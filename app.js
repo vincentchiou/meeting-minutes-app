@@ -664,25 +664,44 @@ document.addEventListener('DOMContentLoaded', () => {
   const serverLabel = document.getElementById('server-label');
   const serverInfo  = document.getElementById('server-info');
 
+  // AbortSignal.timeout() 舊版瀏覽器不支援，改用 AbortController + setTimeout
+  function fetchWithTimeout(url, ms) {
+    const ctrl = new AbortController();
+    const tid  = setTimeout(() => ctrl.abort(), ms);
+    return fetch(url, { signal: ctrl.signal }).finally(() => clearTimeout(tid));
+  }
+
+  let _serverOnline = false;
+
   async function checkServer() {
     try {
-      const r = await fetch(`${SERVER}/health`, { signal: AbortSignal.timeout(3000) });
-      if (!r.ok) throw new Error();
+      const r = await fetchWithTimeout(`${SERVER}/health`, 4000);
+      if (!r.ok) throw new Error('HTTP ' + r.status);
       const d = await r.json();
-      serverDot.className   = 'server-dot online';
+      serverDot.className     = 'server-dot online';
       serverLabel.textContent = '本地伺服器已連線';
       const gpu = d.gpu_name ? `${d.gpu_name}（${d.vram_gb}GB）` : 'CPU 模式';
-      serverInfo.textContent  = `${gpu} · Whisper ${d.model_size} · ffmpeg ${d.ffmpeg ? '已安裝' : '未安裝'}`;
+      serverInfo.textContent  = `${gpu} · Whisper ${d.model_size}${d.model_loaded ? '' : '（載入中…）'} · ffmpeg ${d.ffmpeg ? '已安裝' : '未安裝'}`;
+      if (!_serverOnline) {
+        _serverOnline = true;
+        loadCloudModels().then(updateCloudModelList);
+      }
       return true;
     } catch {
-      serverDot.className   = 'server-dot offline';
+      serverDot.className     = 'server-dot offline';
       serverLabel.textContent = '伺服器未啟動';
-      serverInfo.textContent  = '請先執行 start.bat';
+      serverInfo.textContent  = '請先執行 start.bat，再等候約 10–30 秒';
+      _serverOnline = false;
       return false;
     }
   }
-  checkServer().then(ok => { if (ok) loadCloudModels().then(updateCloudModelList); });
-  setInterval(checkServer, 10000);
+
+  // 掛到 window 供 header 重新連線按鈕呼叫
+  window._checkServer = checkServer;
+
+  // 每 5 秒輪詢（未連線快速重試；連線後維持心跳確認）
+  checkServer();
+  setInterval(checkServer, 5000);
 
   // ── 分頁切換 ──
   document.querySelectorAll('.tab-btn').forEach(btn => {
