@@ -240,6 +240,100 @@
       flex-wrap: wrap;
     }
 
+    /* ── 全螢幕辨識進度遮罩 ── */
+    #transcribe-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 30, 60, 0.82);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 0;
+    }
+    #transcribe-overlay.show { display: flex; }
+
+    .overlay-card {
+      background: #fff;
+      border-radius: 16px;
+      padding: 36px 40px;
+      max-width: 420px;
+      width: 90%;
+      text-align: center;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+    }
+    .overlay-spinner {
+      width: 52px;
+      height: 52px;
+      border: 5px solid #e8f0fe;
+      border-top-color: #1a73e8;
+      border-radius: 50%;
+      animation: spin 0.9s linear infinite;
+      margin: 0 auto 20px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .overlay-title {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: #1a2340;
+      margin-bottom: 6px;
+    }
+    .overlay-filename {
+      font-size: 0.8rem;
+      color: #888;
+      margin-bottom: 20px;
+      word-break: break-all;
+    }
+    .overlay-steps {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      margin-bottom: 20px;
+      text-align: left;
+    }
+    .overlay-step {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 0.85rem;
+      color: #aaa;
+      transition: color .3s;
+    }
+    .overlay-step.done  { color: #34a853; }
+    .overlay-step.active { color: #1a73e8; font-weight: 600; }
+    .overlay-step-icon { font-size: 1rem; width: 20px; text-align: center; }
+
+    .overlay-bar-bg {
+      background: #e8f0fe;
+      border-radius: 8px;
+      height: 10px;
+      overflow: hidden;
+      margin-bottom: 10px;
+    }
+    .overlay-bar {
+      background: linear-gradient(90deg, #1a73e8, #34a853);
+      height: 100%;
+      width: 0%;
+      border-radius: 8px;
+      transition: width .4s ease;
+    }
+    .overlay-pct {
+      font-size: 0.8rem;
+      color: #666;
+      margin-bottom: 16px;
+    }
+    .overlay-notice {
+      background: #fff8e1;
+      border: 1px solid #ffe082;
+      border-radius: 8px;
+      padding: 10px 14px;
+      font-size: 0.78rem;
+      color: #7a5200;
+      line-height: 1.6;
+    }
+
     /* ── 通知 toast ── */
     #toast {
       position: fixed;
@@ -359,6 +453,41 @@
   </div>
 
 </main>
+
+<!-- 全螢幕辨識進度遮罩 -->
+<div id="transcribe-overlay">
+  <div class="overlay-card">
+    <div class="overlay-spinner"></div>
+    <div class="overlay-title">語音辨識處理中</div>
+    <div class="overlay-filename" id="overlay-filename"></div>
+
+    <div class="overlay-steps">
+      <div class="overlay-step" id="step-decode">
+        <span class="overlay-step-icon">🔊</span> 解碼音訊檔案
+      </div>
+      <div class="overlay-step" id="step-model">
+        <span class="overlay-step-icon">📦</span> 載入語音模型
+      </div>
+      <div class="overlay-step" id="step-recog">
+        <span class="overlay-step-icon">✍️</span> 語音辨識轉文字
+      </div>
+      <div class="overlay-step" id="step-done">
+        <span class="overlay-step-icon">✅</span> 完成
+      </div>
+    </div>
+
+    <div class="overlay-bar-bg">
+      <div class="overlay-bar" id="overlay-bar"></div>
+    </div>
+    <div class="overlay-pct" id="overlay-pct">0%</div>
+
+    <div class="overlay-notice">
+      ⚠️ 瀏覽器若出現「<strong>網頁無回應</strong>」提示，<br>
+      請點擊「<strong>等一下</strong>」，不要關閉頁面。<br>
+      音訊越長，處理時間越久，請耐心等候。
+    </div>
+  </div>
+</div>
 
 <div id="toast"></div>
 

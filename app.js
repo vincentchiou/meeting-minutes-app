@@ -575,24 +575,65 @@ document.addEventListener('DOMContentLoaded', () => {
     recStatus.className = 'rec-status' + (isActive ? ' active' : '');
   }
 
+  // ── 全螢幕遮罩控制 ──
+  const overlay        = document.getElementById('transcribe-overlay');
+  const overlayBar     = document.getElementById('overlay-bar');
+  const overlayPct     = document.getElementById('overlay-pct');
+  const overlayFile    = document.getElementById('overlay-filename');
+  const stepDecode     = document.getElementById('step-decode');
+  const stepModel      = document.getElementById('step-model');
+  const stepRecog      = document.getElementById('step-recog');
+  const stepDone       = document.getElementById('step-done');
+
+  function showOverlay(filename) {
+    overlayFile.textContent = filename;
+    overlayBar.style.width = '0%';
+    overlayPct.textContent = '0%';
+    [stepDecode, stepModel, stepRecog, stepDone].forEach(s => s.className = 'overlay-step');
+    overlay.classList.add('show');
+  }
+  function hideOverlay() { overlay.classList.remove('show'); }
+
+  function updateOverlay(label, pct) {
+    overlayBar.style.width = pct + '%';
+    overlayPct.textContent = pct + '%  — ' + label;
+    // 根據進度點亮對應步驟
+    [stepDecode, stepModel, stepRecog, stepDone].forEach(s => s.className = 'overlay-step');
+    if (pct < 15) {
+      stepDecode.className = 'overlay-step active';
+    } else if (pct < 68) {
+      stepDecode.className = 'overlay-step done';
+      stepModel.className  = 'overlay-step active';
+    } else if (pct < 99) {
+      stepDecode.className = 'overlay-step done';
+      stepModel.className  = 'overlay-step done';
+      stepRecog.className  = 'overlay-step active';
+    } else {
+      [stepDecode, stepModel, stepRecog, stepDone].forEach(s => s.className = 'overlay-step done');
+    }
+    // 同步小進度條（卡片內）
+    progressBar.style.width = pct + '%';
+    progressLabel.textContent = label;
+  }
+
   // ── 上傳音檔 ──
   fileUpload.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     fileStatus.textContent = `已選：${file.name}`;
     progressWrap.classList.add('show');
-    progressBar.style.width = '0%';
-    progressLabel.textContent = '準備中…';
+    showOverlay(file.name);
 
     try {
       const result = await transcriber.transcribe(file, (label, pct) => {
-        progressBar.style.width = pct + '%';
-        progressLabel.textContent = label;
+        updateOverlay(label, pct);
       });
+      hideOverlay();
       transcriptArea.value = result;
       progressLabel.textContent = '辨識完成！';
-      showToast('音檔辨識完成，請確認逐字稿後生成會議紀錄');
+      showToast('✅ 音檔辨識完成，請確認逐字稿後點擊「生成會議紀錄」');
     } catch (err) {
+      hideOverlay();
       progressLabel.textContent = '辨識失敗：' + err.message;
       showToast('辨識失敗，請檢查檔案格式或網路連線');
       console.error(err);
