@@ -111,7 +111,7 @@ BASE_DIR = Path(__file__).parent
 async def startup_event():
     """伺服器啟動時預載模型"""
     try:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, load_whisper)
     except Exception as e:
         log.error(f"啟動失敗：{e}")
@@ -226,7 +226,7 @@ async def ollama_analyze(request: dict):
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 30})
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def call_ollama():
                 req = urllib.request.Request(
@@ -346,7 +346,7 @@ async def lmstudio_analyze(request: dict):
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 30})
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def call_lmstudio():
                 req = urllib.request.Request(
@@ -489,7 +489,7 @@ async def cloud_analyze(request: dict):
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 25})
 
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             def call_cloud():
                 req = urllib.request.Request(
@@ -550,6 +550,11 @@ async def transcribe(file: UploadFile = File(...)):
     # 支援的格式
     allowed = {".mp3", ".wav", ".m4a", ".ogg", ".webm", ".flac", ".aac"}
     suffix = Path(file.filename or "audio.wav").suffix.lower()
+    if suffix not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"不支援的格式：{suffix}，支援格式：{', '.join(sorted(allowed))}"
+        )
     if not ENV["ffmpeg"] and suffix not in {".wav", ".webm"}:
         raise HTTPException(
             status_code=400,
@@ -570,7 +575,7 @@ async def transcribe(file: UploadFile = File(...)):
             yield sse({"label": "接收音訊檔案…", "pct": 5})
 
             # 在執行緒池執行 Whisper（避免阻塞 event loop）
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
 
             yield sse({"label": f"語音辨識中（{ENV['device'].upper()} · {ENV['model_size']}）…", "pct": 15})
 

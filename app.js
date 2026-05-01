@@ -347,9 +347,9 @@ class DocumentGenerator {
     lines.push(`參、 主席：${data.chair}`);
     lines.push(`肆、 出席人員：${data.attendees}`);
     lines.push('伍、 會議報告：');
-    (data.reports.length ? data.reports : ['<<待修正>>']).forEach((r, i) => lines.push(`　　${ZH(i+1)}、${r}`));
+    ((data.reports || []).length ? data.reports : ['<<待修正>>']).forEach((r, i) => lines.push(`　　${ZH(i+1)}、${r}`));
     lines.push('陸、 討論事項：');
-    (data.discussions.length ? data.discussions : [{title:'<<待修正>>',desc:'<<待修正>>',resolve:['<<待修正>>']}]).forEach((d, i) => {
+    ((data.discussions || []).length ? data.discussions : [{title:'<<待修正>>',desc:'<<待修正>>',resolve:['<<待修正>>']}]).forEach((d, i) => {
       lines.push(`　案由${ZH(i+1)}：${d.title}`);
       lines.push(`　說明：${d.desc}`);
       lines.push('　決議：');
@@ -398,9 +398,9 @@ class DocumentGenerator {
       mkPara(`參、 主席：${data.chair}`), mkPara(`肆、 出席人員：${data.attendees}`),
       mkPara('伍、 會議報告：', { bold: true }),
     ];
-    (data.reports.length ? data.reports : ['<<待修正>>']).forEach((r, i) => children.push(mkPara(`　　${ZH(i+1)}、${r}`)));
+    ((data.reports || []).length ? data.reports : ['<<待修正>>']).forEach((r, i) => children.push(mkPara(`　　${ZH(i+1)}、${r}`)));
     children.push(mkPara('陸、 討論事項：', { bold: true }));
-    (data.discussions.length ? data.discussions : [{title:'<<待修正>>',desc:'<<待修正>>',resolve:['<<待修正>>']}]).forEach((d, i) => {
+    ((data.discussions || []).length ? data.discussions : [{title:'<<待修正>>',desc:'<<待修正>>',resolve:['<<待修正>>']}]).forEach((d, i) => {
       children.push(mkPara(`　案由${ZH(i+1)}：${d.title}`, { bold: true }));
       children.push(mkPara(`　說明：${d.desc}`));
       children.push(mkPara('　決議：', { bold: true }));
@@ -426,6 +426,32 @@ class DocumentGenerator {
 // ═══════════════════════════════════════════════════════
 // 工具函式
 // ═══════════════════════════════════════════════════════
+
+/**
+ * LLM 回傳資料正規化：確保所有必要欄位存在、型別正確
+ * 避免 LLM 省略欄位時產生 TypeError 或顯示 "undefined"
+ */
+function normalizeLLMData(data, fallbackTitle) {
+  const DEF = '<<待修正>>';
+  const normalizeDiscussions = (arr) => (arr || []).map(d => ({
+    title:   d.title   || DEF,
+    desc:    d.desc    || DEF,
+    resolve: Array.isArray(d.resolve) ? d.resolve.map(r => r || DEF) : [DEF],
+  }));
+  return {
+    title:       data.title       || fallbackTitle || DEF,
+    time:        data.time        || DEF,
+    location:    data.location    || DEF,
+    chair:       data.chair       || DEF,
+    attendees:   data.attendees   || '詳如簽到表',
+    reports:     Array.isArray(data.reports)     ? data.reports.filter(Boolean) : [],
+    discussions: normalizeDiscussions(data.discussions),
+    adhoc:       data.adhoc       || '（無）',
+    adjourn:     data.adjourn     || DEF,
+    todos:       Array.isArray(data.todos)       ? data.todos : [],
+  };
+}
+
 function showToast(msg, duration = 3500) {
   const el = document.getElementById('toast');
   el.textContent = msg; el.classList.add('show');
@@ -721,12 +747,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // ── 生成會議紀錄（優先 LLM，fallback 規則型）──
   function renderResults(data, transcript) {
-    currentTodos   = todoExtractor.extract(transcript, data);
-    // 若 LLM 回傳 todos 則合併
-    if (Array.isArray(data.todos) && data.todos.length) {
-      currentTodos = [...data.todos, ...currentTodos.filter(t =>
-        !data.todos.some(lt => lt.task === t.task))];
-      delete data.todos;
+    // 擷取並移除 todos（已在 normalizeLLMData 或規則型中設定）
+    const llmTodos = Array.isArray(data.todos) ? data.todos : [];
+    if (llmTodos.length) delete data.todos;   // 移除避免進入 buildMinutesText
+    currentTodos = todoExtractor.extract(transcript, data);
+    // 合併 LLM todos（去重）
+    if (llmTodos.length) {
+      currentTodos = [...llmTodos, ...currentTodos.filter(t =>
+        !llmTodos.some(lt => lt.task === t.task))];
     }
     minutesText    = generator.buildMinutesText(data);
     transcriptText = transcript;
@@ -789,17 +817,17 @@ document.addEventListener('DOMContentLoaded', () => {
             selectedProvider, transcript, modelVal, title, updateAnalyzeOverlay
           );
         }
-        currentData = result;
-        if (!currentData.attendees) currentData.attendees = '詳如簽到表';
+        currentData = normalizeLLMData(result, title);
         hideAnalyzeOverlay();
         renderResults(currentData, transcript);
         showToast(`✅ ${providerName} 分析完成！<<待修正>> 處請手動補充`);
       } catch (err) {
         hideAnalyzeOverlay();
-        showToast(`⚠️ ${providerName} 分析失敗（${err.message}），改用規則型分析`);
+        // 合併兩條訊息，延遲顯示第二條，確保使用者兩條都看到
+        showToast(`⚠️ ${providerName} 分析失敗：${err.message}`, 4500);
         currentData = analyzer.analyze(title, transcript);
         renderResults(currentData, transcript);
-        showToast('規則型分析完成，<<待修正>> 處請手動補充');
+        setTimeout(() => showToast('✅ 已改用規則型分析，<<待修正>> 處請手動補充'), 4800);
       } finally {
         btnAnalyze.disabled = false;
       }
