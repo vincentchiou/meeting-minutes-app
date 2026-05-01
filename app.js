@@ -79,57 +79,65 @@ class RecordingManager {
 }
 
 // ═══════════════════════════════════════════════════════
-// 模組 B：AudioTranscriber（Transformers.js Whisper 本地推論）
+// 模組 B：AudioTranscriber（Web Worker + Whisper 背景辨識）
+// 使用 Web Worker 避免主執行緒凍結／頁面無回應
 // ═══════════════════════════════════════════════════════
 class AudioTranscriber {
   constructor() {
-    this.pipe = null;
-    this.loading = false;
+    this.worker = null;
+  }
+
+  _getWorkerURL() {
+    // GitHub Pages 環境：worker.js 與 app.js 同目錄
+    const scripts = document.querySelectorAll('script[src]');
+    for (const s of scripts) {
+      if (s.src.includes('app.js')) {
+        return s.src.replace('app.js', 'worker.js');
+      }
+    }
+    return 'worker.js';
   }
 
   async transcribe(file, onProgress) {
-    onProgress('載入語音辨識模型（首次約需下載 40MB，請稍候）…', 5);
+    onProgress('解碼音訊中…', 10);
 
-    if (!this.pipe) {
-      try {
-        const { pipeline, env } = await import(
-          'https://cdn.jsdelivr.net/npm/@xenova/transformers@2.17.2/dist/transformers.min.js'
-        );
-        env.allowLocalModels = false;
-        this.pipe = await pipeline(
-          'automatic-speech-recognition',
-          'Xenova/whisper-tiny',
-          {
-            progress_callback: (p) => {
-              if (p.status === 'downloading') {
-                const pct = p.total ? Math.round((p.loaded / p.total) * 60) : 20;
-                onProgress(`下載模型中 ${p.file || ''}…`, pct);
-              }
-            }
-          }
-        );
-      } catch (err) {
-        throw new Error('模型載入失敗，請確認網路連線後重試。\n' + err.message);
-      }
-    }
-
-    onProgress('解碼音訊中…', 65);
+    // 在主執行緒解碼音訊（輕量，不會凍結）
     const arrayBuffer = await file.arrayBuffer();
     const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
-    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-    const float32 = decoded.getChannelData(0);
+    let float32;
+    try {
+      const decoded = await audioCtx.decodeAudioData(arrayBuffer);
+      float32 = decoded.getChannelData(0);
+    } catch (e) {
+      throw new Error('無法解碼音訊檔案，請確認格式為 mp3/wav/m4a/ogg/webm。');
+    }
 
-    onProgress('語音辨識中…', 75);
-    const result = await this.pipe(float32, {
-      language: 'chinese',
-      task: 'transcribe',
-      chunk_length_s: 30,
-      stride_length_s: 5,
-      return_timestamps: false,
+    onProgress('啟動語音辨識引擎…', 15);
+
+    // 建立 Worker（若尚未建立）
+    if (!this.worker) {
+      this.worker = new Worker(this._getWorkerURL(), { type: 'module' });
+    }
+
+    // 回傳 Promise，透過訊息與 Worker 溝通
+    return new Promise((resolve, reject) => {
+      this.worker.onmessage = (e) => {
+        const { type, label, pct, text, message } = e.data;
+        if (type === 'progress') {
+          onProgress(label, pct);
+        } else if (type === 'result') {
+          resolve(text);
+        } else if (type === 'error') {
+          reject(new Error(message));
+        }
+      };
+      this.worker.onerror = (err) => {
+        reject(new Error('Worker 錯誤：' + err.message));
+      };
+
+      // 將 Float32Array 傳給 Worker（transferable，零複製）
+      this.worker.postMessage({ type: 'transcribe', audioData: float32 }, [float32.buffer]);
     });
-
-    onProgress('完成！', 100);
-    return Array.isArray(result) ? result.map(r => r.text).join('') : result.text;
   }
 }
 
