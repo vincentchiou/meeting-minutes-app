@@ -81,6 +81,68 @@
     }
     @media (max-width: 600px) { .input-row { grid-template-columns: 1fr; } }
 
+    /* ══ 響應式設計 ══ */
+
+    /* 平板（≤ 768px）*/
+    @media (max-width: 768px) {
+      main { margin: 12px auto; gap: 14px; padding: 0 10px; }
+      header { padding: 10px 14px; gap: 8px; }
+      header h1 { font-size: 1.05rem; }
+      .card { padding: 16px 16px; }
+      .card-title { font-size: 0.75rem; margin-bottom: 12px; }
+
+      #server-status { margin-left: 0; width: 100%; border-radius: 8px; }
+
+      .ai-tabs { gap: 4px; }
+      .ai-tab  { padding: 5px 10px; font-size: 0.76rem; }
+
+      .tabs { overflow-x: auto; white-space: nowrap; padding-bottom: 2px; }
+      .tab-btn { padding: 6px 12px; font-size: 0.82rem; }
+
+      .download-row { gap: 8px; }
+      .btn { padding: 9px 14px; font-size: 0.84rem; }
+      .btn-sm { padding: 4px 10px; font-size: 0.75rem; }
+
+      .action-row { gap: 8px; }
+
+      .overlay-card { padding: 24px 20px; }
+    }
+
+    /* 手機（≤ 480px）*/
+    @media (max-width: 480px) {
+      header { flex-direction: column; align-items: flex-start; gap: 6px; }
+      header .server-info-wrap { width: 100%; }
+      #server-status { font-size: 0.76rem; }
+
+      main { padding: 0 8px; gap: 10px; }
+      .card { padding: 14px 12px; border-radius: 10px; }
+      .card-title { font-size: 0.72rem; margin-bottom: 10px; }
+
+      .input-block { padding: 14px 10px; }
+      .input-block h3 { font-size: 0.88rem; }
+
+      #meeting-title-input { font-size: 0.9rem; padding: 7px 10px; }
+      #transcript-area { font-size: 0.84rem; min-height: 120px; }
+
+      .ai-tabs { flex-wrap: wrap; gap: 4px; }
+      .ai-tab  { flex: 1 1 auto; min-width: 80px; text-align: center;
+                 padding: 6px 8px; font-size: 0.72rem; }
+
+      .tabs { gap: 2px; }
+      .tab-btn { padding: 6px 10px; font-size: 0.78rem; }
+
+      .btn { width: 100%; justify-content: center; }
+      .action-row { flex-direction: column; gap: 8px; }
+      .download-row { flex-direction: column; gap: 8px; }
+      .ai-apikey-row { flex-wrap: nowrap; }
+      .ai-status-row { flex-wrap: wrap; }
+
+      .overlay-card { padding: 20px 14px; max-width: 96vw; }
+      .overlay-title { font-size: 0.95rem; }
+      .overlay-step  { font-size: 0.78rem; }
+      .overlay-notice { font-size: 0.72rem; }
+    }
+
     .input-block {
       border: 2px dashed #d0d9e8;
       border-radius: 10px;
@@ -412,6 +474,44 @@
       font-size: 0.75rem;
       color: #aaa;
     }
+    .ai-apikey-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 10px;
+    }
+    .ai-apikey-row input {
+      flex: 1;
+      padding: 8px 12px;
+      border: 1.5px solid #d0d9e8;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.85rem;
+      color: #333;
+      letter-spacing: 0.05em;
+    }
+    .ai-apikey-row input:focus { outline: none; border-color: #1a73e8; }
+    .ai-provider-select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1.5px solid #d0d9e8;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      color: #333;
+      background: #fff;
+      margin-bottom: 10px;
+    }
+    .ai-provider-select:focus { outline: none; border-color: #1a73e8; }
+    .cloud-privacy-note {
+      background: #e8f5e9;
+      border: 1px solid #a5d6a7;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.75rem;
+      color: #2e7d32;
+      margin-bottom: 10px;
+    }
 
     /* ── 分析進度遮罩 ── */
     #analyze-overlay {
@@ -505,6 +605,7 @@
       <button class="ai-tab active" data-provider="none">📋 規則型分析（預設）</button>
       <button class="ai-tab" data-provider="ollama">🦙 Ollama</button>
       <button class="ai-tab" data-provider="lmstudio">🔬 LM Studio</button>
+      <button class="ai-tab" data-provider="cloud">☁️ 雲端 API</button>
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-ollama">
@@ -529,6 +630,31 @@
         <option value="">-- 請先點擊「重新整理」--</option>
       </select>
       <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://lmstudio.ai" target="_blank">LM Studio</a>，並在「Local Server」頁面載入模型</div>
+    </div>
+
+    <div class="ai-provider-panel" id="ai-panel-cloud">
+      <div class="cloud-privacy-note">🔒 API Key 僅存於本機記憶體，不會儲存至檔案，關閉頁面即清除</div>
+      <select id="cloud-provider" class="ai-provider-select">
+        <option value="openai">🤖 OpenAI（ChatGPT）— 付費</option>
+        <option value="aistudio">✨ Google AI Studio（Gemini）— 免費額度</option>
+        <option value="mistral">🌬 Mistral AI — 付費 / 部分免費</option>
+        <option value="groq">⚡ Groq — 免費高速</option>
+      </select>
+      <div class="ai-apikey-row">
+        <input type="password" id="cloud-apikey" placeholder="貼上 API Key…" autocomplete="off" />
+        <button class="btn btn-outline btn-sm" id="btn-toggle-apikey" title="顯示/隱藏">👁</button>
+      </div>
+      <select id="cloud-model" class="ai-model-select">
+        <option value="gpt-4o">gpt-4o</option>
+        <option value="gpt-4o-mini" selected>gpt-4o-mini</option>
+        <option value="gpt-4-turbo">gpt-4-turbo</option>
+        <option value="gpt-3.5-turbo">gpt-3.5-turbo</option>
+      </select>
+      <div class="ai-fallback-note">
+        取得免費 API Key：
+        <a href="https://aistudio.google.com/app/apikey" target="_blank">Google AI Studio</a> ·
+        <a href="https://console.groq.com/keys" target="_blank">Groq</a>
+      </div>
     </div>
   </div>
 

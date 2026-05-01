@@ -234,6 +234,26 @@ class LocalLLMAnalyzer {
    * 呼叫對應的 /ollama/analyze 或 /lmstudio/analyze（SSE）
    * onProgress(label, pct) 用於更新 UI
    */
+  // 雲端 API（/cloud/analyze）
+  async analyzeCloud(cloudProv, apiKey, model, transcript, title, onProgress) {
+    const endpoint = `${SERVER}/cloud/analyze`;
+    return new Promise(async (resolve, reject) => {
+      try {
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ provider: cloudProv, api_key: apiKey, model, transcript, title }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || '雲端 API 請求失敗');
+        }
+        await this._readSSE(resp, onProgress, resolve, reject);
+      } catch (err) { reject(err); }
+    });
+  }
+
+  // 本地 LLM（Ollama / LM Studio）
   async analyze(provider, transcript, model, title, onProgress) {
     const endpoint = `${SERVER}/${provider}/analyze`;
     return new Promise(async (resolve, reject) => {
@@ -247,35 +267,34 @@ class LocalLLMAnalyzer {
           const err = await resp.json().catch(() => ({ detail: resp.statusText }));
           throw new Error(err.detail || `${provider} 請求失敗`);
         }
-
-        const reader = resp.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-        let result = null;
-
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop();
-          for (const line of lines) {
-            if (!line.startsWith('data:')) continue;
-            try {
-              const data = JSON.parse(line.slice(5).trim());
-              if (data.error) { reject(new Error(data.error)); return; }
-              if (data.label !== undefined && onProgress) onProgress(data.label, data.pct ?? 50);
-              if (data.result) result = data.result;
-            } catch (e) { /* 忽略解析錯誤 */ }
-          }
-        }
-
-        if (result) resolve(result);
-        else reject(new Error('未收到 LLM 分析結果'));
-      } catch (err) {
-        reject(err);
-      }
+        await this._readSSE(resp, onProgress, resolve, reject);
+      } catch (err) { reject(err); }
     });
+  }
+
+  // 共用 SSE 讀取邏輯
+  async _readSSE(resp, onProgress, resolve, reject) {
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '', result = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data:')) continue;
+        try {
+          const data = JSON.parse(line.slice(5).trim());
+          if (data.error) { reject(new Error(data.error)); return; }
+          if (data.label !== undefined && onProgress) onProgress(data.label, data.pct ?? 50);
+          if (data.result) result = data.result;
+        } catch (e) { /* 忽略解析錯誤 */ }
+      }
+    }
+    if (result) resolve(result);
+    else reject(new Error('未收到 LLM 分析結果'));
   }
 }
 
@@ -433,7 +452,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const generator     = new DocumentGenerator();
 
   let currentData = null, currentTodos = [], minutesText = '', transcriptText = '', todosText = '';
-  let selectedProvider = 'none'; // 'none' | 'ollama' | 'lmstudio'
+  let selectedProvider = 'none'; // 'none' | 'ollama' | 'lmstudio' | 'cloud'
 
   // ── DOM refs ──
   const btnRecord      = document.getElementById('btn-record');
@@ -458,10 +477,16 @@ document.addEventListener('DOMContentLoaded', () => {
   const lmsDot        = document.getElementById('lmstudio-dot');
   const lmsLabel      = document.getElementById('lmstudio-label');
   const lmsModel      = document.getElementById('lmstudio-model');
+  const cloudProvider = document.getElementById('cloud-provider');
+  const cloudApiKey   = document.getElementById('cloud-apikey');
+  const cloudModel    = document.getElementById('cloud-model');
   const analyzeOverlay       = document.getElementById('analyze-overlay');
   const analyzeBar           = document.getElementById('analyze-bar');
   const analyzePct           = document.getElementById('analyze-pct');
   const analyzeProviderLabel = document.getElementById('analyze-provider-label');
+
+  // 雲端供應商模型清單（啟動時從 server 取得）
+  let cloudModels = {};
 
   const btnDocx        = document.getElementById('btn-docx');
   const btnTxtMin      = document.getElementById('btn-txt-minutes');
@@ -566,6 +591,35 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('btn-refresh-ollama').addEventListener('click', checkOllama);
   document.getElementById('btn-refresh-lmstudio').addEventListener('click', checkLMStudio);
 
+  // ── 雲端 API：供應商切換更新模型下拉 ──
+  async function loadCloudModels() {
+    try {
+      const r = await fetch(`${SERVER}/cloud/models`, { signal: AbortSignal.timeout(5000) });
+      cloudModels = await r.json();
+    } catch { /* 伺服器未啟動時靜默失敗 */ }
+  }
+
+  function updateCloudModelList() {
+    const prov = cloudProvider.value;
+    const list = cloudModels[prov]?.models || [];
+    const prev = cloudModel.value;
+    cloudModel.innerHTML = '';
+    list.forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = opt.textContent = m;
+      if (m === prev) opt.selected = true;
+      cloudModel.appendChild(opt);
+    });
+    if (!cloudModel.value && list.length) cloudModel.value = list[0];
+  }
+
+  cloudProvider.addEventListener('change', updateCloudModelList);
+
+  // 👁 顯示 / 隱藏 API Key
+  document.getElementById('btn-toggle-apikey').addEventListener('click', () => {
+    cloudApiKey.type = cloudApiKey.type === 'password' ? 'text' : 'password';
+  });
+
   // ── 分析遮罩輔助 ──
   function showAnalyzeOverlay(providerName) {
     analyzeProviderLabel.textContent = providerName;
@@ -601,7 +655,7 @@ document.addEventListener('DOMContentLoaded', () => {
       return false;
     }
   }
-  checkServer();
+  checkServer().then(ok => { if (ok) loadCloudModels().then(updateCloudModelList); });
   setInterval(checkServer, 10000);
 
   // ── 分頁切換 ──
@@ -692,12 +746,28 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!transcript) { showToast('請先錄音或上傳音檔，或直接輸入逐字稿'); return; }
     const title = titleInput.value.trim();
 
-    // 判斷是否使用 LLM
-    const useLLM = selectedProvider !== 'none';
-    const modelVal = selectedProvider === 'ollama' ? ollamaModel.value
-                   : selectedProvider === 'lmstudio' ? lmsModel.value : '';
-    const providerName = selectedProvider === 'ollama' ? 'Ollama'
-                       : selectedProvider === 'lmstudio' ? 'LM Studio' : '';
+    // 判斷 LLM 供應商
+    let useLLM = false, llmProvider = '', modelVal = '', providerName = '', extraParams = {};
+
+    if (selectedProvider === 'ollama') {
+      modelVal = ollamaModel.value;
+      providerName = 'Ollama';
+      useLLM = !!modelVal;
+    } else if (selectedProvider === 'lmstudio') {
+      modelVal = lmsModel.value;
+      providerName = 'LM Studio';
+      useLLM = !!modelVal;
+    } else if (selectedProvider === 'cloud') {
+      const apiKey = cloudApiKey.value.trim();
+      modelVal = cloudModel.value;
+      const cprov = cloudProvider.value;
+      providerName = cloudModels[cprov]?.name || 'Cloud API';
+      if (!apiKey) { showToast('⚠️ 請在 AI 設定中輸入 API Key'); return; }
+      if (!modelVal) { showToast('⚠️ 請選擇模型'); return; }
+      useLLM = true;
+      llmProvider = 'cloud';
+      extraParams = { api_key: apiKey, provider: cprov };
+    }
 
     if (useLLM && !modelVal) {
       showToast(`⚠️ 請先在 AI 設定中選擇 ${providerName} 模型`);
@@ -708,9 +778,18 @@ document.addEventListener('DOMContentLoaded', () => {
       btnAnalyze.disabled = true;
       showAnalyzeOverlay(`${providerName} · ${modelVal}`);
       try {
-        currentData = await llmAnalyzer.analyze(
-          selectedProvider, transcript, modelVal, title, updateAnalyzeOverlay
-        );
+        // cloud 用 /cloud/analyze，其他用 /ollama/ 或 /lmstudio/
+        let result;
+        if (selectedProvider === 'cloud') {
+          result = await llmAnalyzer.analyzeCloud(
+            extraParams.provider, extraParams.api_key, modelVal, transcript, title, updateAnalyzeOverlay
+          );
+        } else {
+          result = await llmAnalyzer.analyze(
+            selectedProvider, transcript, modelVal, title, updateAnalyzeOverlay
+          );
+        }
+        currentData = result;
         if (!currentData.attendees) currentData.attendees = '詳如簽到表';
         hideAnalyzeOverlay();
         renderResults(currentData, transcript);

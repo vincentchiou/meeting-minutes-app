@@ -386,6 +386,161 @@ async def lmstudio_analyze(request: dict):
     )
 
 
+# ── 雲端 API 整合（OpenAI-compatible）──
+CLOUD_CONFIGS = {
+    "openai": {
+        "name": "OpenAI（ChatGPT）",
+        "base": "https://api.openai.com/v1",
+        "models": ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-3.5-turbo"],
+    },
+    "aistudio": {
+        "name": "Google AI Studio（Gemini）",
+        "base": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "models": ["gemini-2.0-flash", "gemini-1.5-pro", "gemini-1.5-flash-latest"],
+    },
+    "mistral": {
+        "name": "Mistral AI",
+        "base": "https://api.mistral.ai/v1",
+        "models": ["mistral-large-latest", "mistral-small-latest", "open-mistral-7b"],
+    },
+    "groq": {
+        "name": "Groq（免費·高速）",
+        "base": "https://api.groq.com/openai/v1",
+        "models": ["llama3-70b-8192", "llama3-8b-8192", "mixtral-8x7b-32768", "gemma2-9b-it"],
+    },
+}
+
+
+@app.get("/cloud/models")
+async def cloud_models():
+    """回傳各雲端供應商的可用模型清單"""
+    return JSONResponse({k: {"name": v["name"], "models": v["models"]} for k, v in CLOUD_CONFIGS.items()})
+
+
+@app.post("/cloud/analyze")
+async def cloud_analyze(request: dict):
+    """使用雲端 LLM API 分析逐字稿（OpenAI-compatible，SSE 串流）"""
+    import urllib.request, urllib.error
+    provider   = request.get("provider", "")
+    api_key    = request.get("api_key", "").strip()
+    model      = request.get("model", "")
+    transcript = request.get("transcript", "")
+    title      = request.get("title", "")
+
+    if provider not in CLOUD_CONFIGS:
+        raise HTTPException(status_code=400, detail=f"不支援的供應商：{provider}")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API Key 不可為空")
+    if not transcript:
+        raise HTTPException(status_code=400, detail="transcript 不可為空")
+
+    cfg = CLOUD_CONFIGS[provider]
+    endpoint_url = f"{cfg['base']}/chat/completions"
+    provider_name = cfg["name"]
+
+    prompt = f"""你是一位專業的繁體中文會議記錄整理員。
+請根據以下會議逐字稿，整理成結構化的 JSON 格式。
+
+逐字稿：
+{transcript[:6000]}
+
+請輸出以下 JSON 結構（嚴格 JSON，不要有多餘說明）：
+{{
+  "title": "會議名稱（若逐字稿有提到）或{title or '<<待修正>>'}",
+  "time": "會議時間（若無則 <<待修正>>）",
+  "location": "會議地點（若無則 <<待修正>>）",
+  "chair": "主席姓名職稱（若無則 <<待修正>>）",
+  "attendees": "詳如簽到表",
+  "reports": ["報告項目一", "報告項目二"],
+  "discussions": [
+    {{
+      "title": "案由標題",
+      "desc": "說明內容",
+      "resolve": ["決議一", "決議二"]
+    }}
+  ],
+  "adhoc": "臨時動議內容（若無則（無））",
+  "adjourn": "散會時間（若無則 <<待修正>>）",
+  "todos": [
+    {{
+      "task": "待辦事項描述",
+      "owner": "負責人（若無則 <<待修正>>）",
+      "deadline": "期限（若無則 <<待修正>>）",
+      "source": "來源欄位"
+    }}
+  ]
+}}
+"""
+
+    async def stream_analyze() -> AsyncGenerator[str, None]:
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        yield sse({"label": f"連接 {provider_name}…", "pct": 10})
+
+        try:
+            payload = json.dumps({
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "max_tokens": 4096,
+                "response_format": {"type": "json_object"},
+            }).encode("utf-8")
+
+            yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 25})
+
+            loop = asyncio.get_event_loop()
+
+            def call_cloud():
+                req = urllib.request.Request(
+                    endpoint_url,
+                    data=payload,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                    },
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=60) as resp:
+                    return json.loads(resp.read().decode())
+
+            result = await loop.run_in_executor(None, call_cloud)
+            choices = result.get("choices", [])
+            raw_response = choices[0].get("message", {}).get("content", "") if choices else ""
+
+            yield sse({"label": "解析結果…", "pct": 85})
+
+            try:
+                start = raw_response.find("{")
+                end   = raw_response.rfind("}") + 1
+                data  = json.loads(raw_response[start:end])
+            except Exception:
+                yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
+                return
+
+            yield sse({"label": "分析完成！", "pct": 100})
+            yield sse({"result": data, "pct": 100})
+
+        except urllib.error.HTTPError as e:
+            body = e.read().decode(errors="ignore")
+            log.error(f"雲端 API HTTPError {e.code}：{body[:200]}")
+            if e.code == 401:
+                yield sse({"error": "API Key 無效或已過期，請確認後重試"})
+            elif e.code == 429:
+                yield sse({"error": "API 額度不足或請求太頻繁，請稍後再試"})
+            else:
+                yield sse({"error": f"API 錯誤 {e.code}：{body[:120]}"})
+        except Exception as e:
+            log.error(f"雲端 analyze 錯誤：{e}")
+            yield sse({"error": f"連線錯誤：{str(e)}"})
+
+    return StreamingResponse(
+        stream_analyze(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+
 # ── 語音辨識（SSE 串流進度）──
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):
