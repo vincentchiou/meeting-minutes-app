@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>錄音轉會議紀錄</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Noto Sans TC', sans-serif;
+      background: #f0f4f8;
+      color: #333;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a73e8;
+      color: #fff;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+    header h1 { font-size: 1.25rem; font-weight: 700; }
+    header span { font-size: 0.85rem; opacity: 0.85; }
+
+    main {
+      max-width: 960px;
+      margin: 24px auto;
+      padding: 0 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 20px 24px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.08);
+    }
+    .card-title {
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #1a73e8;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 16px;
+    }
+
+    /* ── 輸入區 ── */
+    .input-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    @media (max-width: 600px) { .input-row { grid-template-columns: 1fr; } }
+
+    .input-block {
+      border: 2px dashed #d0d9e8;
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      transition: border-color .2s;
+    }
+    .input-block:hover { border-color: #1a73e8; }
+    .input-block h3 { font-size: 0.95rem; margin-bottom: 8px; color: #444; }
+    .input-block p  { font-size: 0.78rem; color: #888; margin-bottom: 16px; }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background .2s, transform .1s;
+    }
+    .btn:active { transform: scale(0.97); }
+    .btn-primary   { background: #1a73e8; color: #fff; }
+    .btn-primary:hover { background: #1558b0; }
+    .btn-danger    { background: #ea4335; color: #fff; }
+    .btn-danger:hover  { background: #c62828; }
+    .btn-success   { background: #34a853; color: #fff; }
+    .btn-success:hover { background: #256d3b; }
+    .btn-outline   { background: #fff; color: #1a73e8; border: 1.5px solid #1a73e8; }
+    .btn-outline:hover { background: #e8f0fe; }
+    .btn:disabled  { opacity: 0.45; cursor: not-allowed; }
+
+    #btn-record.recording { background: #ea4335; animation: pulse 1.2s infinite; }
+    @keyframes pulse {
+      0%,100% { box-shadow: 0 0 0 0 rgba(234,67,53,0.4); }
+      50%      { box-shadow: 0 0 0 8px rgba(234,67,53,0); }
+    }
+
+    .file-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 10px 20px;
+      background: #fff;
+      color: #1a73e8;
+      border: 1.5px solid #1a73e8;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background .2s;
+    }
+    .file-label:hover { background: #e8f0fe; }
+    #file-upload { display: none; }
+
+    .rec-status {
+      margin-top: 10px;
+      font-size: 0.78rem;
+      color: #888;
+      min-height: 18px;
+    }
+    .rec-status.active { color: #ea4335; font-weight: 600; }
+
+    /* 進度條 */
+    #progress-wrap {
+      display: none;
+      margin-top: 12px;
+    }
+    #progress-wrap.show { display: block; }
+    #progress-bar-bg {
+      background: #e8f0fe;
+      border-radius: 6px;
+      height: 8px;
+      overflow: hidden;
+    }
+    #progress-bar {
+      background: #1a73e8;
+      height: 100%;
+      width: 0%;
+      transition: width .3s;
+      border-radius: 6px;
+    }
+    #progress-label { font-size: 0.75rem; color: #666; margin-top: 4px; }
+
+    /* ── 逐字稿區 ── */
+    #meeting-title-input {
+      width: 100%;
+      font-size: 1rem;
+      padding: 8px 12px;
+      border: 1.5px solid #d0d9e8;
+      border-radius: 8px;
+      font-family: inherit;
+      margin-bottom: 12px;
+      color: #222;
+    }
+    #meeting-title-input:focus { outline: none; border-color: #1a73e8; }
+
+    #transcript-area {
+      width: 100%;
+      min-height: 140px;
+      border: 1.5px solid #d0d9e8;
+      border-radius: 8px;
+      padding: 12px;
+      font-size: 0.9rem;
+      font-family: inherit;
+      resize: vertical;
+      line-height: 1.7;
+    }
+    #transcript-area:focus { outline: none; border-color: #1a73e8; }
+
+    .action-row {
+      display: flex;
+      gap: 10px;
+      margin-top: 14px;
+      flex-wrap: wrap;
+    }
+
+    /* ── 輸出分頁 ── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 2px solid #e0e8f4;
+      margin-bottom: 16px;
+    }
+    .tab-btn {
+      padding: 8px 18px;
+      border: none;
+      background: none;
+      font-size: 0.9rem;
+      font-family: inherit;
+      cursor: pointer;
+      color: #666;
+      border-bottom: 2px solid transparent;
+      margin-bottom: -2px;
+      border-radius: 4px 4px 0 0;
+      transition: color .15s;
+    }
+    .tab-btn.active { color: #1a73e8; border-bottom-color: #1a73e8; font-weight: 700; }
+    .tab-btn:hover:not(.active) { color: #1a73e8; background: #f0f4ff; }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .output-box {
+      background: #fafbfd;
+      border: 1.5px solid #e0e8f4;
+      border-radius: 8px;
+      padding: 16px 20px;
+      font-size: 0.88rem;
+      line-height: 1.9;
+      min-height: 200px;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+    .output-box[contenteditable="true"]:focus { outline: 2px solid #1a73e8; outline-offset: -2px; }
+
+    .placeholder-msg {
+      color: #aab;
+      font-style: italic;
+      font-size: 0.85rem;
+      text-align: center;
+      padding: 40px 0;
+    }
+
+    mark.missing {
+      background: #fff3cd;
+      color: #856404;
+      border-radius: 3px;
+      padding: 0 3px;
+      font-weight: 600;
+    }
+
+    /* ── 下載區 ── */
+    .download-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    /* ── 通知 toast ── */
+    #toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: #323232;
+      color: #fff;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 0.88rem;
+      opacity: 0;
+      transform: translateY(10px);
+      transition: opacity .3s, transform .3s;
+      z-index: 9999;
+      pointer-events: none;
+    }
+    #toast.show { opacity: 1; transform: translateY(0); }
+  </style>
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 24 24" fill="white"><path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/></svg>
+  <div>
+    <h1>錄音轉會議紀錄</h1>
+    <span>支援直接錄音 &amp; 上傳音檔 · 免費 · 不需網路 API</span>
+  </div>
+</header>
+
+<main>
+
+  <!-- ① 輸入區 -->
+  <div class="card">
+    <div class="card-title">① 輸入來源</div>
+    <div class="input-row">
+
+      <div class="input-block">
+        <h3>🎙 直接錄音</h3>
+        <p>點擊開始，麥克風即時辨識文字</p>
+        <button class="btn btn-primary" id="btn-record">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><circle cx="12" cy="12" r="8"/></svg>
+          開始錄音
+        </button>
+        <div class="rec-status" id="rec-status">等待開始…</div>
+      </div>
+
+      <div class="input-block">
+        <h3>📂 上傳音檔</h3>
+        <p>支援 mp3、wav、m4a、ogg、webm</p>
+        <label class="file-label" for="file-upload">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="#1a73e8"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+          選擇檔案
+        </label>
+        <input type="file" id="file-upload" accept=".mp3,.wav,.m4a,.ogg,.webm,audio/*" />
+        <div class="rec-status" id="file-status">尚未選擇檔案</div>
+        <div id="progress-wrap">
+          <div id="progress-bar-bg"><div id="progress-bar"></div></div>
+          <div id="progress-label">準備中…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ② 逐字稿編輯區 -->
+  <div class="card">
+    <div class="card-title">② 確認逐字稿（可手動修正）</div>
+    <input type="text" id="meeting-title-input" placeholder="會議名稱（例：114年度第一次行政會議）" />
+    <textarea id="transcript-area" placeholder="錄音或上傳音檔後，逐字稿將顯示於此。&#10;您也可以直接貼上文字或手動輸入。"></textarea>
+    <div class="action-row">
+      <button class="btn btn-success" id="btn-analyze">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-7 3c1.93 0 3.5 1.57 3.5 3.5S13.93 13 12 13s-3.5-1.57-3.5-3.5S10.07 6 12 6zm7 13H5v-.23c0-.62.28-1.2.76-1.58C7.47 15.82 9.64 15 12 15s4.53.82 6.24 2.19c.48.38.76.97.76 1.58V19z"/></svg>
+        生成會議紀錄
+      </button>
+      <button class="btn btn-outline" id="btn-clear">清除全部</button>
+    </div>
+  </div>
+
+  <!-- ③ 輸出預覽 -->
+  <div class="card" id="output-card">
+    <div class="card-title">③ 輸出預覽</div>
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="minutes">📄 會議紀錄</button>
+      <button class="tab-btn" data-tab="transcript">📝 逐字稿</button>
+      <button class="tab-btn" data-tab="todos">✅ 待辦事項</button>
+    </div>
+
+    <div class="tab-panel active" id="panel-minutes">
+      <div class="output-box" id="out-minutes" contenteditable="false">
+        <div class="placeholder-msg">請先輸入逐字稿，點擊「生成會議紀錄」後顯示結果</div>
+      </div>
+    </div>
+    <div class="tab-panel" id="panel-transcript">
+      <div class="output-box" id="out-transcript" contenteditable="false">
+        <div class="placeholder-msg">逐字稿將顯示於此</div>
+      </div>
+    </div>
+    <div class="tab-panel" id="panel-todos">
+      <div class="output-box" id="out-todos" contenteditable="false">
+        <div class="placeholder-msg">待辦事項將顯示於此</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ④ 下載區 -->
+  <div class="card">
+    <div class="card-title">④ 下載</div>
+    <div class="download-row">
+      <button class="btn btn-primary" id="btn-docx" disabled>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="white"><path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/></svg>
+        下載會議紀錄 (.docx)
+      </button>
+      <button class="btn btn-outline" id="btn-txt-minutes" disabled>下載會議紀錄 (.txt)</button>
+      <button class="btn btn-outline" id="btn-txt-transcript" disabled>下載逐字稿 (.txt)</button>
+      <button class="btn btn-outline" id="btn-txt-todos" disabled>下載待辦事項 (.txt)</button>
+    </div>
+  </div>
+
+</main>
+
+<div id="toast"></div>
+
+<!-- docx.js CDN -->
+<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
