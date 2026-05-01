@@ -1,0 +1,15 @@
+# 錄音轉會議紀錄 APP — 本地版依賴套件
+# 安裝方式：pip install -r requirements.txt
+
+# Web 伺服器
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+python-multipart>=0.0.9
+
+# 語音辨識（本地 Whisper，支援 GPU）
+faster-whisper>=1.0.0
+
+# GPU 支援（NVIDIA）— install.bat 會依偵測結果自動安裝正確版本
+# 若手動安裝：有 CUDA → pip install torch --index-url https://download.pytorch.org/whl/cu121
+#              無 CUDA → pip install torch --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
