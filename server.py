@@ -147,6 +147,245 @@ async def health():
     })
 
 
+# ── Ollama 整合 ──
+OLLAMA_BASE = "http://localhost:11434"
+
+@app.get("/ollama/status")
+async def ollama_status():
+    """檢查 Ollama 是否執行中，並回傳可用模型清單"""
+    import urllib.request, urllib.error
+    try:
+        req = urllib.request.Request(f"{OLLAMA_BASE}/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            models = [m["name"] for m in data.get("models", [])]
+            return JSONResponse({"available": True, "models": models})
+    except Exception as e:
+        return JSONResponse({"available": False, "models": [], "error": str(e)})
+
+
+@app.post("/ollama/analyze")
+async def ollama_analyze(request: dict):
+    """使用 Ollama LLM 分析逐字稿，生成結構化會議紀錄 JSON"""
+    import urllib.request, urllib.error
+    transcript = request.get("transcript", "")
+    model      = request.get("model", "llama3")
+    title      = request.get("title", "")
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="transcript 不可為空")
+
+    prompt = f"""你是一位專業的繁體中文會議記錄整理員。
+請根據以下會議逐字稿，整理成結構化的 JSON 格式。
+
+逐字稿：
+{transcript[:6000]}
+
+請輸出以下 JSON 結構（嚴格 JSON，不要有多餘說明）：
+{{
+  "title": "會議名稱（若逐字稿有提到）或{title or '<<待修正>>'}",
+  "time": "會議時間（若無則 <<待修正>>）",
+  "location": "會議地點（若無則 <<待修正>>）",
+  "chair": "主席姓名職稱（若無則 <<待修正>>）",
+  "attendees": "詳如簽到表",
+  "reports": ["報告項目一", "報告項目二"],
+  "discussions": [
+    {{
+      "title": "案由標題",
+      "desc": "說明內容",
+      "resolve": ["決議一", "決議二"]
+    }}
+  ],
+  "adhoc": "臨時動議內容（若無則（無））",
+  "adjourn": "散會時間（若無則 <<待修正>>）",
+  "todos": [
+    {{
+      "task": "待辦事項描述",
+      "owner": "負責人（若無則 <<待修正>>）",
+      "deadline": "期限（若無則 <<待修正>>）",
+      "source": "來源欄位"
+    }}
+  ]
+}}
+"""
+
+    async def stream_analyze() -> AsyncGenerator[str, None]:
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        yield sse({"label": f"連接 Ollama（{model}）…", "pct": 10})
+
+        try:
+            payload = json.dumps({
+                "model": model,
+                "prompt": prompt,
+                "stream": False,
+                "format": "json",
+                "options": {"temperature": 0.1, "num_predict": 4096}
+            }).encode("utf-8")
+
+            yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 30})
+
+            loop = asyncio.get_event_loop()
+
+            def call_ollama():
+                req = urllib.request.Request(
+                    f"{OLLAMA_BASE}/api/generate",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=120) as resp:
+                    return json.loads(resp.read().decode())
+
+            result = await loop.run_in_executor(None, call_ollama)
+            raw_response = result.get("response", "")
+
+            yield sse({"label": "解析結果…", "pct": 85})
+
+            # 嘗試解析 JSON（Ollama 有時會加多餘文字）
+            try:
+                start = raw_response.find("{")
+                end   = raw_response.rfind("}") + 1
+                data  = json.loads(raw_response[start:end])
+            except Exception:
+                yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
+                return
+
+            yield sse({"label": "分析完成！", "pct": 100})
+            yield sse({"result": data, "pct": 100})
+
+        except Exception as e:
+            log.error(f"Ollama analyze 錯誤：{e}")
+            yield sse({"error": f"Ollama 錯誤：{str(e)}"})
+
+    return StreamingResponse(
+        stream_analyze(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+
+# ── LM Studio 整合（OpenAI-compatible API）──
+LMSTUDIO_BASE = "http://localhost:1234"
+
+@app.get("/lmstudio/status")
+async def lmstudio_status():
+    """檢查 LM Studio 是否執行中，並回傳已載入模型清單"""
+    import urllib.request, urllib.error
+    try:
+        req = urllib.request.Request(f"{LMSTUDIO_BASE}/v1/models", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+            models = [m["id"] for m in data.get("data", [])]
+            return JSONResponse({"available": True, "models": models})
+    except Exception as e:
+        return JSONResponse({"available": False, "models": [], "error": str(e)})
+
+
+@app.post("/lmstudio/analyze")
+async def lmstudio_analyze(request: dict):
+    """使用 LM Studio（OpenAI-compatible）分析逐字稿，生成結構化會議紀錄 JSON"""
+    import urllib.request, urllib.error
+    transcript = request.get("transcript", "")
+    model      = request.get("model", "")
+    title      = request.get("title", "")
+
+    if not transcript:
+        raise HTTPException(status_code=400, detail="transcript 不可為空")
+
+    prompt = f"""你是一位專業的繁體中文會議記錄整理員。
+請根據以下會議逐字稿，整理成結構化的 JSON 格式。
+
+逐字稿：
+{transcript[:6000]}
+
+請輸出以下 JSON 結構（嚴格 JSON，不要有多餘說明）：
+{{
+  "title": "會議名稱（若逐字稿有提到）或{title or '<<待修正>>'}",
+  "time": "會議時間（若無則 <<待修正>>）",
+  "location": "會議地點（若無則 <<待修正>>）",
+  "chair": "主席姓名職稱（若無則 <<待修正>>）",
+  "attendees": "詳如簽到表",
+  "reports": ["報告項目一", "報告項目二"],
+  "discussions": [
+    {{
+      "title": "案由標題",
+      "desc": "說明內容",
+      "resolve": ["決議一", "決議二"]
+    }}
+  ],
+  "adhoc": "臨時動議內容（若無則（無））",
+  "adjourn": "散會時間（若無則 <<待修正>>）",
+  "todos": [
+    {{
+      "task": "待辦事項描述",
+      "owner": "負責人（若無則 <<待修正>>）",
+      "deadline": "期限（若無則 <<待修正>>）",
+      "source": "來源欄位"
+    }}
+  ]
+}}
+"""
+
+    async def stream_analyze() -> AsyncGenerator[str, None]:
+        def sse(data: dict) -> str:
+            return f"data: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+        yield sse({"label": f"連接 LM Studio（{model}）…", "pct": 10})
+
+        try:
+            payload = json.dumps({
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.1,
+                "stream": False,
+                "max_tokens": 4096,
+                "response_format": {"type": "json_object"}
+            }).encode("utf-8")
+
+            yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 30})
+
+            loop = asyncio.get_event_loop()
+
+            def call_lmstudio():
+                req = urllib.request.Request(
+                    f"{LMSTUDIO_BASE}/v1/chat/completions",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=180) as resp:
+                    return json.loads(resp.read().decode())
+
+            result = await loop.run_in_executor(None, call_lmstudio)
+            choices = result.get("choices", [])
+            raw_response = choices[0].get("message", {}).get("content", "") if choices else ""
+
+            yield sse({"label": "解析結果…", "pct": 85})
+
+            try:
+                start = raw_response.find("{")
+                end   = raw_response.rfind("}") + 1
+                data  = json.loads(raw_response[start:end])
+            except Exception:
+                yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
+                return
+
+            yield sse({"label": "分析完成！", "pct": 100})
+            yield sse({"result": data, "pct": 100})
+
+        except Exception as e:
+            log.error(f"LM Studio analyze 錯誤：{e}")
+            yield sse({"error": f"LM Studio 錯誤：{str(e)}"})
+
+    return StreamingResponse(
+        stream_analyze(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+    )
+
+
 # ── 語音辨識（SSE 串流進度）──
 @app.post("/transcribe")
 async def transcribe(file: UploadFile = File(...)):

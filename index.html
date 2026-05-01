@@ -355,6 +355,78 @@
       line-height: 1.6;
     }
 
+    /* ── AI 設定卡 ── */
+    .ai-settings-note {
+      font-size: 0.78rem;
+      color: #888;
+      margin-bottom: 14px;
+    }
+    .ai-tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 14px;
+      flex-wrap: wrap;
+    }
+    .ai-tab {
+      padding: 6px 16px;
+      border: 1.5px solid #d0d9e8;
+      border-radius: 20px;
+      background: #fff;
+      font-size: 0.82rem;
+      font-family: inherit;
+      cursor: pointer;
+      color: #555;
+      transition: all .15s;
+    }
+    .ai-tab.active {
+      background: #1a73e8;
+      border-color: #1a73e8;
+      color: #fff;
+      font-weight: 600;
+    }
+    .ai-tab:hover:not(.active) { background: #e8f0fe; border-color: #1a73e8; color: #1a73e8; }
+    .ai-provider-panel { display: none; }
+    .ai-provider-panel.show { display: block; }
+    .ai-status-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+    }
+    #ai-status-text { font-size: 0.82rem; color: #555; flex: 1; }
+    .btn-sm { padding: 5px 12px; font-size: 0.78rem; }
+    .ai-model-select {
+      width: 100%;
+      padding: 8px 12px;
+      border: 1.5px solid #d0d9e8;
+      border-radius: 8px;
+      font-family: inherit;
+      font-size: 0.88rem;
+      color: #333;
+      background: #fff;
+    }
+    .ai-model-select:focus { outline: none; border-color: #1a73e8; }
+    .ai-fallback-note {
+      margin-top: 10px;
+      font-size: 0.75rem;
+      color: #aaa;
+    }
+
+    /* ── 分析進度遮罩 ── */
+    #analyze-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(15, 30, 60, 0.82);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+    }
+    #analyze-overlay.show { display: flex; }
+    #analyze-overlay .overlay-card { max-width: 360px; }
+    #analyze-pct { font-size: 0.8rem; color: #666; margin-bottom: 6px; }
+
     /* ── 通知 toast ── */
     #toast {
       position: fixed;
@@ -421,6 +493,42 @@
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <!-- ① AI 分析設定（選用）-->
+  <div class="card">
+    <div class="card-title">🤖 AI 分析設定（選用）</div>
+    <p class="ai-settings-note">選擇本地 LLM 可大幅提升分析品質；未連接時自動使用規則型分析（免費、完全離線）</p>
+
+    <div class="ai-tabs">
+      <button class="ai-tab active" data-provider="none">📋 規則型分析（預設）</button>
+      <button class="ai-tab" data-provider="ollama">🦙 Ollama</button>
+      <button class="ai-tab" data-provider="lmstudio">🔬 LM Studio</button>
+    </div>
+
+    <div class="ai-provider-panel" id="ai-panel-ollama">
+      <div class="ai-status-row">
+        <span class="server-dot offline" id="ollama-dot"></span>
+        <span id="ollama-label">尚未檢查</span>
+        <button class="btn btn-outline btn-sm" id="btn-refresh-ollama">重新整理</button>
+      </div>
+      <select id="ollama-model" class="ai-model-select">
+        <option value="">-- 請先點擊「重新整理」--</option>
+      </select>
+      <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://ollama.com" target="_blank">Ollama</a>，並執行如 <code>ollama pull llama3</code></div>
+    </div>
+
+    <div class="ai-provider-panel" id="ai-panel-lmstudio">
+      <div class="ai-status-row">
+        <span class="server-dot offline" id="lmstudio-dot"></span>
+        <span id="lmstudio-label">尚未檢查</span>
+        <button class="btn btn-outline btn-sm" id="btn-refresh-lmstudio">重新整理</button>
+      </div>
+      <select id="lmstudio-model" class="ai-model-select">
+        <option value="">-- 請先點擊「重新整理」--</option>
+      </select>
+      <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://lmstudio.ai" target="_blank">LM Studio</a>，並在「Local Server」頁面載入模型</div>
     </div>
   </div>
 
@@ -511,6 +619,23 @@
       ⚠️ 瀏覽器若出現「<strong>網頁無回應</strong>」提示，<br>
       請點擊「<strong>等一下</strong>」，不要關閉頁面。<br>
       音訊越長，處理時間越久，請耐心等候。
+    </div>
+  </div>
+</div>
+
+<!-- 分析進度遮罩 -->
+<div id="analyze-overlay">
+  <div class="overlay-card">
+    <div class="overlay-spinner"></div>
+    <div class="overlay-title">AI 分析會議逐字稿</div>
+    <div class="overlay-filename" id="analyze-provider-label"></div>
+    <div class="overlay-bar-bg" style="margin-bottom:8px">
+      <div class="overlay-bar" id="analyze-bar"></div>
+    </div>
+    <div id="analyze-pct">0%</div>
+    <div class="overlay-notice">
+      ⚠️ LLM 分析需要 10–60 秒（依模型大小而異），請耐心等候。<br>
+      分析完成後可手動修正 <strong>【&lt;&lt;待修正&gt;&gt;】</strong> 欄位。
     </div>
   </div>
 </div>

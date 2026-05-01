@@ -226,7 +226,61 @@ class MeetingAnalyzer {
 }
 
 // ═══════════════════════════════════════════════════════
-// 模組 D：TodoExtractor
+// 模組 D：LocalLLMAnalyzer（Ollama / LM Studio）
+// ═══════════════════════════════════════════════════════
+class LocalLLMAnalyzer {
+  /**
+   * provider: 'ollama' | 'lmstudio'
+   * 呼叫對應的 /ollama/analyze 或 /lmstudio/analyze（SSE）
+   * onProgress(label, pct) 用於更新 UI
+   */
+  async analyze(provider, transcript, model, title, onProgress) {
+    const endpoint = `${SERVER}/${provider}/analyze`;
+    return new Promise(async (resolve, reject) => {
+      try {
+        const resp = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ transcript, model, title }),
+        });
+        if (!resp.ok) {
+          const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+          throw new Error(err.detail || `${provider} 請求失敗`);
+        }
+
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let result = null;
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          buffer = lines.pop();
+          for (const line of lines) {
+            if (!line.startsWith('data:')) continue;
+            try {
+              const data = JSON.parse(line.slice(5).trim());
+              if (data.error) { reject(new Error(data.error)); return; }
+              if (data.label !== undefined && onProgress) onProgress(data.label, data.pct ?? 50);
+              if (data.result) result = data.result;
+            } catch (e) { /* 忽略解析錯誤 */ }
+          }
+        }
+
+        if (result) resolve(result);
+        else reject(new Error('未收到 LLM 分析結果'));
+      } catch (err) {
+        reject(err);
+      }
+    });
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// 模組 E：TodoExtractor
 // ═══════════════════════════════════════════════════════
 class TodoExtractor {
   extract(transcript, meetingData) {
@@ -374,10 +428,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const recManager    = new RecordingManager(onRecordStatus);
   const transcriber   = new LocalTranscriber();
   const analyzer      = new MeetingAnalyzer();
+  const llmAnalyzer   = new LocalLLMAnalyzer();
   const todoExtractor = new TodoExtractor();
   const generator     = new DocumentGenerator();
 
   let currentData = null, currentTodos = [], minutesText = '', transcriptText = '', todosText = '';
+  let selectedProvider = 'none'; // 'none' | 'ollama' | 'lmstudio'
 
   // ── DOM refs ──
   const btnRecord      = document.getElementById('btn-record');
@@ -394,6 +450,19 @@ document.addEventListener('DOMContentLoaded', () => {
   const outMinutes     = document.getElementById('out-minutes');
   const outTranscript  = document.getElementById('out-transcript');
   const outTodos       = document.getElementById('out-todos');
+  // ── AI 設定面板 refs ──
+  const aiTabs        = document.querySelectorAll('.ai-tab');
+  const ollamaDot     = document.getElementById('ollama-dot');
+  const ollamaLabel   = document.getElementById('ollama-label');
+  const ollamaModel   = document.getElementById('ollama-model');
+  const lmsDot        = document.getElementById('lmstudio-dot');
+  const lmsLabel      = document.getElementById('lmstudio-label');
+  const lmsModel      = document.getElementById('lmstudio-model');
+  const analyzeOverlay       = document.getElementById('analyze-overlay');
+  const analyzeBar           = document.getElementById('analyze-bar');
+  const analyzePct           = document.getElementById('analyze-pct');
+  const analyzeProviderLabel = document.getElementById('analyze-provider-label');
+
   const btnDocx        = document.getElementById('btn-docx');
   const btnTxtMin      = document.getElementById('btn-txt-minutes');
   const btnTxtTrans    = document.getElementById('btn-txt-transcript');
@@ -425,6 +494,89 @@ document.addEventListener('DOMContentLoaded', () => {
     else if (pct < 99) { stepDecode.className = 'overlay-step done'; stepModel.className = 'overlay-step done'; stepRecog.className = 'overlay-step active'; }
     else               [stepDecode, stepModel, stepRecog, stepDone2].forEach(s => s.className = 'overlay-step done');
     progressBar.style.width = pct + '%'; progressLabel.textContent = label;
+  }
+
+  // ── AI 設定面板：分頁切換 ──
+  aiTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      aiTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      selectedProvider = tab.dataset.provider;
+      document.querySelectorAll('.ai-provider-panel').forEach(p => p.classList.remove('show'));
+      if (selectedProvider !== 'none') {
+        document.getElementById(`ai-panel-${selectedProvider}`).classList.add('show');
+      }
+    });
+  });
+
+  // ── Ollama 狀態 ──
+  async function checkOllama() {
+    try {
+      const r = await fetch(`${SERVER}/ollama/status`, { signal: AbortSignal.timeout(5000) });
+      const d = await r.json();
+      if (d.available) {
+        ollamaDot.className = 'server-dot online';
+        ollamaLabel.textContent = `已連線（${d.models.length} 個模型）`;
+        const prev = ollamaModel.value;
+        ollamaModel.innerHTML = '<option value="">-- 請選擇模型 --</option>';
+        d.models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = opt.textContent = m;
+          if (m === prev) opt.selected = true;
+          ollamaModel.appendChild(opt);
+        });
+      } else {
+        ollamaDot.className = 'server-dot offline';
+        ollamaLabel.textContent = 'Ollama 未啟動';
+        ollamaModel.innerHTML = '<option value="">-- Ollama 未連線 --</option>';
+      }
+    } catch {
+      ollamaDot.className = 'server-dot offline';
+      ollamaLabel.textContent = 'Ollama 未啟動';
+    }
+  }
+
+  // ── LM Studio 狀態 ──
+  async function checkLMStudio() {
+    try {
+      const r = await fetch(`${SERVER}/lmstudio/status`, { signal: AbortSignal.timeout(5000) });
+      const d = await r.json();
+      if (d.available) {
+        lmsDot.className = 'server-dot online';
+        lmsLabel.textContent = `已連線（${d.models.length} 個模型）`;
+        const prev = lmsModel.value;
+        lmsModel.innerHTML = '<option value="">-- 請選擇模型 --</option>';
+        d.models.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = opt.textContent = m;
+          if (m === prev) opt.selected = true;
+          lmsModel.appendChild(opt);
+        });
+      } else {
+        lmsDot.className = 'server-dot offline';
+        lmsLabel.textContent = 'LM Studio 未啟動';
+        lmsModel.innerHTML = '<option value="">-- LM Studio 未連線 --</option>';
+      }
+    } catch {
+      lmsDot.className = 'server-dot offline';
+      lmsLabel.textContent = 'LM Studio 未啟動';
+    }
+  }
+
+  document.getElementById('btn-refresh-ollama').addEventListener('click', checkOllama);
+  document.getElementById('btn-refresh-lmstudio').addEventListener('click', checkLMStudio);
+
+  // ── 分析遮罩輔助 ──
+  function showAnalyzeOverlay(providerName) {
+    analyzeProviderLabel.textContent = providerName;
+    analyzeBar.style.width = '0%';
+    analyzePct.textContent = '0% — 準備中…';
+    analyzeOverlay.classList.add('show');
+  }
+  function hideAnalyzeOverlay() { analyzeOverlay.classList.remove('show'); }
+  function updateAnalyzeOverlay(label, pct) {
+    analyzeBar.style.width = pct + '%';
+    analyzePct.textContent = `${pct}% — ${label}`;
   }
 
   // ── 伺服器狀態檢查 ──
@@ -513,16 +665,18 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   }
 
-  // ── 生成會議紀錄 ──
-  btnAnalyze.addEventListener('click', () => {
-    const transcript = transcriptArea.value.trim();
-    if (!transcript) { showToast('請先錄音或上傳音檔，或直接輸入逐字稿'); return; }
-    const title = titleInput.value.trim();
-    currentData  = analyzer.analyze(title, transcript);
-    currentTodos = todoExtractor.extract(transcript, currentData);
-    minutesText    = generator.buildMinutesText(currentData);
+  // ── 生成會議紀錄（優先 LLM，fallback 規則型）──
+  function renderResults(data, transcript) {
+    currentTodos   = todoExtractor.extract(transcript, data);
+    // 若 LLM 回傳 todos 則合併
+    if (Array.isArray(data.todos) && data.todos.length) {
+      currentTodos = [...data.todos, ...currentTodos.filter(t =>
+        !data.todos.some(lt => lt.task === t.task))];
+      delete data.todos;
+    }
+    minutesText    = generator.buildMinutesText(data);
     transcriptText = transcript;
-    todosText      = generator.buildTodosText(currentTodos, currentData.title);
+    todosText      = generator.buildTodosText(currentTodos, data.title);
     outMinutes.innerHTML    = highlightMissing(escapeHtml(minutesText));
     outTranscript.innerHTML = escapeHtml(transcriptText);
     outTodos.innerHTML      = highlightMissing(escapeHtml(todosText));
@@ -531,7 +685,51 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
     document.querySelector('[data-tab="minutes"]').classList.add('active');
     document.getElementById('panel-minutes').classList.add('active');
-    showToast('會議紀錄生成完成！<<待修正>> 處請手動補充');
+  }
+
+  btnAnalyze.addEventListener('click', async () => {
+    const transcript = transcriptArea.value.trim();
+    if (!transcript) { showToast('請先錄音或上傳音檔，或直接輸入逐字稿'); return; }
+    const title = titleInput.value.trim();
+
+    // 判斷是否使用 LLM
+    const useLLM = selectedProvider !== 'none';
+    const modelVal = selectedProvider === 'ollama' ? ollamaModel.value
+                   : selectedProvider === 'lmstudio' ? lmsModel.value : '';
+    const providerName = selectedProvider === 'ollama' ? 'Ollama'
+                       : selectedProvider === 'lmstudio' ? 'LM Studio' : '';
+
+    if (useLLM && !modelVal) {
+      showToast(`⚠️ 請先在 AI 設定中選擇 ${providerName} 模型`);
+      return;
+    }
+
+    if (useLLM) {
+      btnAnalyze.disabled = true;
+      showAnalyzeOverlay(`${providerName} · ${modelVal}`);
+      try {
+        currentData = await llmAnalyzer.analyze(
+          selectedProvider, transcript, modelVal, title, updateAnalyzeOverlay
+        );
+        if (!currentData.attendees) currentData.attendees = '詳如簽到表';
+        hideAnalyzeOverlay();
+        renderResults(currentData, transcript);
+        showToast(`✅ ${providerName} 分析完成！<<待修正>> 處請手動補充`);
+      } catch (err) {
+        hideAnalyzeOverlay();
+        showToast(`⚠️ ${providerName} 分析失敗（${err.message}），改用規則型分析`);
+        currentData = analyzer.analyze(title, transcript);
+        renderResults(currentData, transcript);
+        showToast('規則型分析完成，<<待修正>> 處請手動補充');
+      } finally {
+        btnAnalyze.disabled = false;
+      }
+    } else {
+      // 純規則型
+      currentData = analyzer.analyze(title, transcript);
+      renderResults(currentData, transcript);
+      showToast('會議紀錄生成完成！<<待修正>> 處請手動補充');
+    }
   });
 
   // ── 清除 ──
