@@ -1,4 +1,8 @@
 .claude/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
 *.log
 Thumbs.db
 .DS_Store
