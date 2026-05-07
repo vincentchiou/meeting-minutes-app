@@ -147,12 +147,29 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).parent
 
+DOCX_JS_URL  = "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.min.js"
+DOCX_JS_PATH = BASE_DIR / "docx.min.js"
+
+
+def ensure_docx_js():
+    """若 docx.min.js 不在本機則從 CDN 下載；離線時沿用舊版"""
+    if DOCX_JS_PATH.exists():
+        return
+    try:
+        import urllib.request as _req
+        log.info("下載 docx.js 到本機...")
+        _req.urlretrieve(DOCX_JS_URL, str(DOCX_JS_PATH))
+        log.info(f"✅ docx.js 已儲存至 {DOCX_JS_PATH}")
+    except Exception as e:
+        log.warning(f"docx.js 下載失敗（離線？）：{e}")
+
 
 @app.on_event("startup")
 async def startup_event():
-    """伺服器啟動時預載模型"""
+    """伺服器啟動時預載模型並下載 docx.js"""
     try:
         loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, ensure_docx_js)
         await loop.run_in_executor(None, load_whisper)
     except Exception as e:
         log.error(f"啟動失敗：{e}")
@@ -165,6 +182,15 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR)), name="static")
 @app.get("/")
 async def root():
     return FileResponse(str(BASE_DIR / "index.html"))
+
+
+@app.get("/docx.js")
+async def serve_docx_js():
+    """提供本機快取的 docx.min.js（優先）；不存在時 302 到 CDN"""
+    if DOCX_JS_PATH.exists():
+        return FileResponse(str(DOCX_JS_PATH), media_type="application/javascript")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(DOCX_JS_URL)
 
 
 @app.get("/app.js")

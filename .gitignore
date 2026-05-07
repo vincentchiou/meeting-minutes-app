@@ -6,3 +6,4 @@ __pycache__/
 *.log
 Thumbs.db
 .DS_Store
+docx.min.js
