@@ -199,6 +199,34 @@
     .file-label:hover { background: #e8f0fe; }
     #file-upload { display: none; }
 
+    .drop-zone {
+      border: 2px dashed #bbb;
+      border-radius: 10px;
+      padding: 18px 16px;
+      text-align: center;
+      transition: border-color .2s, background .2s;
+    }
+    .drop-zone.drag-over {
+      border-color: #1a73e8;
+      background: #e8f0fe;
+    }
+
+    .ai-url-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .ai-url-row label { font-size: 0.78rem; color: #888; white-space: nowrap; }
+    .ai-url-input {
+      flex: 1;
+      padding: 5px 8px;
+      font-size: 0.82rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      color: #333;
+    }
+
     .rec-status {
       margin-top: 10px;
       font-size: 0.78rem;
@@ -581,13 +609,15 @@
 
       <div class="input-block">
         <h3>📂 上傳音檔</h3>
-        <p>支援 mp3、wav、m4a、ogg、webm</p>
-        <label class="file-label" for="file-upload">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="#1a73e8"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-          選擇檔案
-        </label>
-        <input type="file" id="file-upload" accept=".mp3,.wav,.m4a,.ogg,.webm,audio/*" />
-        <div class="rec-status" id="file-status">尚未選擇檔案</div>
+        <div class="drop-zone" id="drop-zone">
+          <p style="margin:0 0 10px;color:#555">支援 mp3、wav、m4a、ogg、webm　｜　可直接拖曳檔案到此區域</p>
+          <label class="file-label" for="file-upload">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#1a73e8"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+            選擇檔案
+          </label>
+          <input type="file" id="file-upload" accept=".mp3,.wav,.m4a,.ogg,.webm,audio/*" />
+          <div class="rec-status" id="file-status">尚未選擇檔案</div>
+        </div>
         <div id="progress-wrap">
           <div id="progress-bar-bg"><div id="progress-bar"></div></div>
           <div id="progress-label">準備中…</div>
@@ -610,6 +640,10 @@
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-ollama">
+      <div class="ai-url-row">
+        <label for="ollama-url">伺服器位址</label>
+        <input type="text" id="ollama-url" class="ai-url-input" value="http://localhost:11434" placeholder="http://localhost:11434" />
+      </div>
       <div class="ai-status-row">
         <span class="server-dot offline" id="ollama-dot"></span>
         <span id="ollama-label">尚未檢查</span>
@@ -622,6 +656,10 @@
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-lmstudio">
+      <div class="ai-url-row">
+        <label for="lmstudio-url">伺服器位址</label>
+        <input type="text" id="lmstudio-url" class="ai-url-input" value="http://localhost:1234" placeholder="http://localhost:1234" />
+      </div>
       <div class="ai-status-row">
         <span class="server-dot offline" id="lmstudio-dot"></span>
         <span id="lmstudio-label">尚未檢查</span>

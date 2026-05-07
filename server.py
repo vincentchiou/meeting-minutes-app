@@ -6,7 +6,7 @@ import os, sys, json, shutil, tempfile, asyncio, logging
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,9 +59,50 @@ def detect_environment() -> dict:
         info["ffmpeg"] = True
         log.info("✅ ffmpeg 已安裝（支援 mp3/m4a/ogg/webm）")
     else:
-        log.info("⚠️  ffmpeg 未安裝，僅支援 wav 格式（建議安裝 ffmpeg）")
+        log.info("⚠️  ffmpeg 未安裝，嘗試自動安裝...")
+        info["ffmpeg"] = _try_install_ffmpeg()
 
     return info
+
+
+def _try_install_ffmpeg() -> bool:
+    """嘗試透過 winget 安裝 ffmpeg，成功後更新 PATH 並回傳 True"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["winget", "install", "Gyan.FFmpeg", "-e", "--silent",
+             "--accept-package-agreements", "--accept-source-agreements"],
+            capture_output=True, timeout=180
+        )
+        if result.returncode not in (0, -1978335189):  # 0=OK, -1978335189=already installed
+            log.warning(f"winget ffmpeg 安裝失敗（returncode={result.returncode}）")
+            return False
+    except FileNotFoundError:
+        log.warning("winget 不存在，無法自動安裝 ffmpeg")
+        return False
+    except Exception as e:
+        log.warning(f"ffmpeg 自動安裝例外：{e}")
+        return False
+
+    # winget 安裝後 ffmpeg 可能在新路徑，嘗試已知常見路徑
+    import glob as _glob
+    candidate_dirs = [
+        r"C:\Program Files\ffmpeg\bin",
+        r"C:\ffmpeg\bin",
+    ] + _glob.glob(r"C:\Users\*\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg*\ffmpeg*\bin")
+    for d in candidate_dirs:
+        if os.path.isfile(os.path.join(d, "ffmpeg.exe")):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            log.info(f"✅ ffmpeg 自動安裝完成（{d}）")
+            return True
+
+    # 嘗試重新偵測（PATH 可能已由 winget 更新）
+    if shutil.which("ffmpeg"):
+        log.info("✅ ffmpeg 自動安裝完成")
+        return True
+
+    log.warning("ffmpeg 安裝後仍無法偵測，可能需要重新啟動 start.bat")
+    return False
 
 
 ENV = detect_environment()
@@ -148,14 +189,15 @@ async def health():
 
 
 # ── Ollama 整合 ──
-OLLAMA_BASE = "http://localhost:11434"
+OLLAMA_DEFAULT = "http://localhost:11434"
 
 @app.get("/ollama/status")
-async def ollama_status():
+async def ollama_status(base_url: str = Query(default=OLLAMA_DEFAULT)):
     """檢查 Ollama 是否執行中，並回傳可用模型清單"""
     import urllib.request, urllib.error
+    base_url = base_url.rstrip("/")
     try:
-        req = urllib.request.Request(f"{OLLAMA_BASE}/api/tags", method="GET")
+        req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode())
             models = [m["name"] for m in data.get("models", [])]
@@ -171,6 +213,7 @@ async def ollama_analyze(request: dict):
     transcript = request.get("transcript", "")
     model      = request.get("model", "llama3")
     title      = request.get("title", "")
+    ollama_base = request.get("base_url", OLLAMA_DEFAULT).rstrip("/")
 
     if not transcript:
         raise HTTPException(status_code=400, detail="transcript 不可為空")
@@ -230,7 +273,7 @@ async def ollama_analyze(request: dict):
 
             def call_ollama():
                 req = urllib.request.Request(
-                    f"{OLLAMA_BASE}/api/generate",
+                    f"{ollama_base}/api/generate",
                     data=payload,
                     headers={"Content-Type": "application/json"},
                     method="POST"
@@ -267,14 +310,15 @@ async def ollama_analyze(request: dict):
 
 
 # ── LM Studio 整合（OpenAI-compatible API）──
-LMSTUDIO_BASE = "http://localhost:1234"
+LMSTUDIO_DEFAULT = "http://localhost:1234"
 
 @app.get("/lmstudio/status")
-async def lmstudio_status():
+async def lmstudio_status(base_url: str = Query(default=LMSTUDIO_DEFAULT)):
     """檢查 LM Studio 是否執行中，並回傳已載入模型清單"""
     import urllib.request, urllib.error
+    base_url = base_url.rstrip("/")
     try:
-        req = urllib.request.Request(f"{LMSTUDIO_BASE}/v1/models", method="GET")
+        req = urllib.request.Request(f"{base_url}/v1/models", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode())
             models = [m["id"] for m in data.get("data", [])]
@@ -290,6 +334,7 @@ async def lmstudio_analyze(request: dict):
     transcript = request.get("transcript", "")
     model      = request.get("model", "")
     title      = request.get("title", "")
+    lms_base   = request.get("base_url", LMSTUDIO_DEFAULT).rstrip("/")
 
     if not transcript:
         raise HTTPException(status_code=400, detail="transcript 不可為空")
@@ -350,7 +395,7 @@ async def lmstudio_analyze(request: dict):
 
             def call_lmstudio():
                 req = urllib.request.Request(
-                    f"{LMSTUDIO_BASE}/v1/chat/completions",
+                    f"{lms_base}/v1/chat/completions",
                     data=payload,
                     headers={"Content-Type": "application/json"},
                     method="POST"
@@ -556,9 +601,12 @@ async def transcribe(file: UploadFile = File(...)):
             detail=f"不支援的格式：{suffix}，支援格式：{', '.join(sorted(allowed))}"
         )
     if not ENV["ffmpeg"] and suffix not in {".wav", ".webm"}:
+        # 再嘗試一次安裝（可能第一次未生效）
+        ENV["ffmpeg"] = _try_install_ffmpeg()
+    if not ENV["ffmpeg"] and suffix not in {".wav", ".webm"}:
         raise HTTPException(
             status_code=400,
-            detail=f"未安裝 ffmpeg，僅支援 wav/webm 格式。請安裝 ffmpeg 以支援 {suffix}"
+            detail=f"ffmpeg 安裝中或失敗，請關閉後重新執行 start.bat，或手動安裝 ffmpeg。目前僅支援 wav/webm 格式。"
         )
 
     # 儲存上傳檔案到暫存目錄

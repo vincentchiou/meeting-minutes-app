@@ -254,14 +254,16 @@ class LocalLLMAnalyzer {
   }
 
   // 本地 LLM（Ollama / LM Studio）
-  async analyze(provider, transcript, model, title, onProgress) {
+  async analyze(provider, transcript, model, title, onProgress, baseUrl) {
     const endpoint = `${SERVER}/${provider}/analyze`;
     return new Promise(async (resolve, reject) => {
       try {
+        const body = { transcript, model, title };
+        if (baseUrl) body.base_url = baseUrl;
         const resp = await fetch(endpoint, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ transcript, model, title }),
+          body: JSON.stringify(body),
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({ detail: resp.statusText }));
@@ -500,9 +502,11 @@ document.addEventListener('DOMContentLoaded', () => {
   const ollamaDot     = document.getElementById('ollama-dot');
   const ollamaLabel   = document.getElementById('ollama-label');
   const ollamaModel   = document.getElementById('ollama-model');
+  const ollamaUrl     = document.getElementById('ollama-url');
   const lmsDot        = document.getElementById('lmstudio-dot');
   const lmsLabel      = document.getElementById('lmstudio-label');
   const lmsModel      = document.getElementById('lmstudio-model');
+  const lmsUrl        = document.getElementById('lmstudio-url');
   const cloudProvider = document.getElementById('cloud-provider');
   const cloudApiKey   = document.getElementById('cloud-apikey');
   const cloudModel    = document.getElementById('cloud-model');
@@ -563,7 +567,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── Ollama 狀態 ──
   async function checkOllama() {
     try {
-      const r = await fetch(`${SERVER}/ollama/status`, { signal: AbortSignal.timeout(5000) });
+      const url = `${SERVER}/ollama/status?base_url=${encodeURIComponent(ollamaUrl.value.trim() || 'http://localhost:11434')}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
       const d = await r.json();
       if (d.available) {
         ollamaDot.className = 'server-dot online';
@@ -590,7 +595,8 @@ document.addEventListener('DOMContentLoaded', () => {
   // ── LM Studio 狀態 ──
   async function checkLMStudio() {
     try {
-      const r = await fetch(`${SERVER}/lmstudio/status`, { signal: AbortSignal.timeout(5000) });
+      const url = `${SERVER}/lmstudio/status?base_url=${encodeURIComponent(lmsUrl.value.trim() || 'http://localhost:1234')}`;
+      const r = await fetch(url, { signal: AbortSignal.timeout(5000) });
       const d = await r.json();
       if (d.available) {
         lmsDot.className = 'server-dot online';
@@ -745,6 +751,29 @@ document.addEventListener('DOMContentLoaded', () => {
     await sendToTranscribe(file, file.name);
   });
 
+  // ── 拖曳上傳 ──
+  const dropZone = document.getElementById('drop-zone');
+  dropZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    dropZone.classList.add('drag-over');
+  });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    const allowed = ['audio/', 'video/'];
+    const extOk = /\.(mp3|wav|m4a|ogg|webm|flac|aac)$/i.test(file.name);
+    if (!allowed.some(t => file.type.startsWith(t)) && !extOk) {
+      showToast('⚠️ 不支援的檔案格式，請使用 mp3、wav、m4a、ogg、webm');
+      return;
+    }
+    if (!(await checkServer())) { showToast('⚠️ 伺服器未啟動，請先執行 start.bat'); return; }
+    fileStatus.textContent = `已選：${file.name}`;
+    await sendToTranscribe(file, file.name);
+  });
+
   // ── 共用：送出到本地 Whisper ──
   async function sendToTranscribe(fileOrBlob, name) {
     progressWrap.classList.add('show');
@@ -800,10 +829,12 @@ document.addEventListener('DOMContentLoaded', () => {
       modelVal = ollamaModel.value;
       providerName = 'Ollama';
       useLLM = !!modelVal;
+      extraParams = { base_url: ollamaUrl.value.trim() || 'http://localhost:11434' };
     } else if (selectedProvider === 'lmstudio') {
       modelVal = lmsModel.value;
       providerName = 'LM Studio';
       useLLM = !!modelVal;
+      extraParams = { base_url: lmsUrl.value.trim() || 'http://localhost:1234' };
     } else if (selectedProvider === 'cloud') {
       const apiKey = cloudApiKey.value.trim();
       modelVal = cloudModel.value;
@@ -833,7 +864,7 @@ document.addEventListener('DOMContentLoaded', () => {
           );
         } else {
           result = await llmAnalyzer.analyze(
-            selectedProvider, transcript, modelVal, title, updateAnalyzeOverlay
+            selectedProvider, transcript, modelVal, title, updateAnalyzeOverlay, extraParams.base_url
           );
         }
         currentData = normalizeLLMData(result, title);

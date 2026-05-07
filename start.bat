@@ -106,6 +106,31 @@ echo.
 echo   [OK] All packages ready!
 echo.
 
+REM --- 4. Check ffmpeg ---
+:ffmpeg_check
+ffmpeg -version >nul 2>&1
+if not errorlevel 1 goto :start_server
+
+echo   [!!] ffmpeg not found -- installing via winget...
+echo        (needed for mp3/m4a/ogg decoding)
+winget install Gyan.FFmpeg -e --silent --accept-package-agreements --accept-source-agreements >nul 2>&1
+
+REM Re-check after install (winget may have updated PATH)
+ffmpeg -version >nul 2>&1
+if not errorlevel 1 (
+    echo   [OK] ffmpeg installed
+    goto :start_server
+)
+
+REM Check known install path
+if exist "C:\Program Files\ffmpeg\bin\ffmpeg.exe" (
+    echo   [OK] ffmpeg ready
+    goto :start_server
+)
+
+echo   [--] ffmpeg install may need a restart to take effect
+echo        (wav/webm files still work without ffmpeg)
+
 :start_server
 if not exist "%~dp0server.py" goto :no_server
 
