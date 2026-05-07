@@ -121,7 +121,7 @@ echo   Close this window to stop the server
 echo ------------------------------------------------
 echo.
 
-start /b powershell -WindowStyle Hidden -NonInteractive -Command "$i=0; while($i -lt 60){ Start-Sleep 3; try{ $r=Invoke-WebRequest 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop; if($r.StatusCode -eq 200){ Start-Process 'http://localhost:8000'; break } }catch{}; $i++ }"
+start /b powershell -WindowStyle Hidden -NonInteractive -Command "$i=0; while($i -lt 300){ Start-Sleep 3; try{ $r=Invoke-WebRequest 'http://localhost:8000/health' -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop; if($r.StatusCode -eq 200){ Start-Process 'http://localhost:8000'; break } }catch{}; $i++ }"
 
 cd /d "%~dp0"
 "%VENV_PYTHON%" server.py
