@@ -380,14 +380,16 @@ async def lmstudio_analyze(request: dict):
         yield sse({"label": f"連接 LM Studio（{model}）…", "pct": 10})
 
         try:
-            payload = json.dumps({
-                "model": model,
+            # 不帶 response_format，避免不支援 JSON mode 的模型回 400
+            req_body = {
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "stream": False,
                 "max_tokens": 4096,
-                "response_format": {"type": "json_object"}
-            }).encode("utf-8")
+            }
+            if model:
+                req_body["model"] = model
+            payload = json.dumps(req_body).encode("utf-8")
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 30})
 
