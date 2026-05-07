@@ -531,7 +531,6 @@ async def cloud_analyze(request: dict):
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "max_tokens": 4096,
-                "response_format": {"type": "json_object"},
             }).encode("utf-8")
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 25})
