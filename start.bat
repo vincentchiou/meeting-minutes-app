@@ -17,7 +17,6 @@ if "%PYTHON_CMD%"=="" (
     if not errorlevel 1 set PYTHON_CMD=py
 )
 if "%PYTHON_CMD%"=="" (
-    echo.
     echo [ERROR] Python not found!
     echo        Install: https://www.python.org/downloads/
     echo.
@@ -25,83 +24,95 @@ if "%PYTHON_CMD%"=="" (
     exit /b 1
 )
 
-REM ─── 2. Check / create .venv ──────────────────────
+REM ─── 2. Check .venv state ─────────────────────────
 set VENV_DIR=%~dp0.venv
 set VENV_PYTHON=%VENV_DIR%\Scripts\python.exe
 set VENV_PIP=%VENV_DIR%\Scripts\pip.exe
 
-set DO_INSTALL=0
-if exist "%VENV_PYTHON%" (
-    REM venv exists — verify it actually works
-    "%VENV_PYTHON%" --version >nul 2>&1
-    if errorlevel 1 (
-        echo   [!!] .venv is broken, rebuilding...
-        rmdir /s /q "%VENV_DIR%"
-        set DO_INSTALL=1
-    )
-) else (
-    set DO_INSTALL=1
+REM Case A: .venv doesn't exist at all
+if not exist "%VENV_PYTHON%" goto :build_venv
+
+REM Case B: python.exe exists but is broken (base Python moved/uninstalled)
+"%VENV_PYTHON%" --version >nul 2>&1
+if errorlevel 1 (
+    echo   [!!] .venv is broken, rebuilding...
+    rmdir /s /q "%VENV_DIR%"
+    goto :build_venv
 )
 
-if "%DO_INSTALL%"=="1" (
-    echo   First-time setup — installing packages. This may take several minutes.
-    echo.
-
-    %PYTHON_CMD% -m venv "%VENV_DIR%"
-    if errorlevel 1 (
-        echo.
-        echo [ERROR] Failed to create .venv
-        echo.
-        pause
-        exit /b 1
-    )
-
-    echo   Upgrading pip...
-    "%VENV_PIP%" install --upgrade pip --quiet
-
-    REM Detect GPU (presence only — avoid nvidia-smi format quirks)
-    nvidia-smi >nul 2>&1
-    if not errorlevel 1 (
-        echo   [OK] NVIDIA GPU detected — installing PyTorch CUDA...
-        "%VENV_PIP%" install torch --index-url https://download.pytorch.org/whl/cu121
-    ) else (
-        echo   [--] No GPU — installing PyTorch CPU version...
-        "%VENV_PIP%" install torch --index-url https://download.pytorch.org/whl/cpu
-    )
-    if errorlevel 1 (
-        echo.
-        echo [ERROR] PyTorch install failed. Check internet and try again.
-        echo.
-        pause
-        exit /b 1
-    )
-
-    echo   Installing fastapi / uvicorn / faster-whisper...
-    "%VENV_PIP%" install fastapi "uvicorn[standard]" python-multipart faster-whisper
-    if errorlevel 1 (
-        echo.
-        echo [ERROR] Package install failed. Check internet and try again.
-        echo.
-        pause
-        exit /b 1
-    )
-
-    echo.
-    echo   [OK] Setup complete!
-    echo.
-)
-
-REM ─── 3. Sanity-check packages ─────────────────────
+REM Case C: python.exe works but packages were never installed
 "%VENV_PYTHON%" -c "import fastapi, uvicorn, faster_whisper" >nul 2>&1
 if errorlevel 1 (
+    echo   [!!] Packages missing, installing now...
+    goto :install_pkgs
+)
+
+REM All good — skip to start
+goto :start_server
+
+REM ─── Build fresh .venv ────────────────────────────
+:build_venv
+echo   Creating .venv...
+%PYTHON_CMD% -m venv "%VENV_DIR%"
+if errorlevel 1 (
     echo.
-    echo [ERROR] Packages missing even after install.
-    echo        Delete the .venv folder and run this script again.
+    echo [ERROR] Failed to create .venv
+    echo.
+    pause
+    exit /b 1
+)
+echo   Upgrading pip...
+"%VENV_PIP%" install --upgrade pip --quiet
+
+REM (fall through to install_pkgs)
+
+REM ─── Install packages ─────────────────────────────
+:install_pkgs
+echo.
+echo   Installing packages — this may take several minutes...
+echo.
+
+nvidia-smi >nul 2>&1
+if not errorlevel 1 (
+    echo   [OK] NVIDIA GPU detected — installing PyTorch CUDA...
+    "%VENV_PIP%" install torch --index-url https://download.pytorch.org/whl/cu121
+) else (
+    echo   [--] No GPU — installing PyTorch CPU version...
+    "%VENV_PIP%" install torch --index-url https://download.pytorch.org/whl/cpu
+)
+if errorlevel 1 (
+    echo.
+    echo [ERROR] PyTorch install failed. Check internet and try again.
     echo.
     pause
     exit /b 1
 )
 
+echo   Installing fastapi / uvicorn / faster-whisper...
+"%VENV_PIP%" install fastapi "uvicorn[standard]" python-multipart faster-whisper
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Package install failed. Check internet and try again.
+    echo.
+    pause
+    exit /b 1
+)
+
+REM Verify packages after install
+"%VENV_PYTHON%" -c "import fastapi, uvicorn, faster_whisper" >nul 2>&1
+if errorlevel 1 (
+    echo.
+    echo [ERROR] Packages still missing. Try running install.bat for a clean reinstall.
+    echo.
+    pause
+    exit /b 1
+)
+echo.
+echo   [OK] All packages ready!
+echo.
+
+REM ─── Start server ─────────────────────────────────
+:start_server
 if not exist "%~dp0server.py" (
     echo.
     echo [ERROR] server.py not found.
@@ -110,11 +121,10 @@ if not exist "%~dp0server.py" (
     exit /b 1
 )
 
-REM ─── 4. Start server ──────────────────────────────
 echo   [OK] Environment ready
 echo.
 echo   Starting server...
-echo   (First run will download the Whisper model — may take a few minutes)
+echo   (First run downloads the Whisper model — may take a few minutes)
 echo.
 echo   Browser will open automatically when ready.
 echo   Or visit: http://localhost:8000
