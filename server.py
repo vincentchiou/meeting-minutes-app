@@ -418,15 +418,17 @@ async def lmstudio_analyze(request: dict):
         yield sse({"label": f"連接 LM Studio（{model}）…", "pct": 10})
 
         try:
-            # system message 要求直接輸出 JSON，抑制 Qwen3/DeepSeek 等思考型模型的 <think> 區塊
+            # system message + /no_think 標記，關閉 Qwen3/DeepSeek 等思考型模型的思考模式
+            # enable_thinking: false 為 Qwen3 官方 API 參數（LM Studio >= 0.3.6 支援）
             req_body = {
                 "messages": [
-                    {"role": "system", "content": "你是專業會議記錄整理員。請直接輸出符合要求的 JSON，不要輸出任何說明、思考過程或 markdown 格式。"},
+                    {"role": "system", "content": "你是專業會議記錄整理員。請直接輸出符合要求的 JSON，不要輸出任何說明、思考過程或 markdown 格式。/no_think"},
                     {"role": "user", "content": prompt},
                 ],
                 "temperature": 0.1,
                 "stream": False,
                 "max_tokens": 8192,
+                "enable_thinking": False,
             }
             if model:
                 req_body["model"] = model
