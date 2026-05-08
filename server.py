@@ -2,7 +2,7 @@
 錄音轉會議紀錄 APP — 本地 GPU 版
 FastAPI 後端：自動偵測環境、Whisper 語音辨識、SSE 進度推送
 """
-import os, sys, json, shutil, tempfile, asyncio, logging
+import os, sys, json, re, shutil, tempfile, asyncio, logging
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -103,6 +103,20 @@ def _try_install_ffmpeg() -> bool:
 
     log.warning("ffmpeg 安裝後仍無法偵測，可能需要重新啟動 start.bat")
     return False
+
+
+def extract_json_from_llm(raw: str) -> dict:
+    """從 LLM 回傳文字中提取 JSON。
+    自動移除 <think>...</think> 思考區塊（Qwen3 / DeepSeek-R1 等思考型模型）。
+    """
+    # 移除思考過程
+    clean = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    # 找第一個 { 到最後一個 }
+    start = clean.find("{")
+    end   = clean.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"找不到 JSON 區塊（回傳前100字：{clean[:100]}）")
+    return json.loads(clean[start:end])
 
 
 ENV = detect_environment()
@@ -312,12 +326,10 @@ async def ollama_analyze(request: dict):
 
             yield sse({"label": "解析結果…", "pct": 85})
 
-            # 嘗試解析 JSON（Ollama 有時會加多餘文字）
             try:
-                start = raw_response.find("{")
-                end   = raw_response.rfind("}") + 1
-                data  = json.loads(raw_response[start:end])
-            except Exception:
+                data = extract_json_from_llm(raw_response)
+            except Exception as parse_err:
+                log.warning(f"Ollama JSON 解析失敗：{parse_err}｜回傳前200字：{raw_response[:200]}")
                 yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
                 return
 
@@ -406,12 +418,15 @@ async def lmstudio_analyze(request: dict):
         yield sse({"label": f"連接 LM Studio（{model}）…", "pct": 10})
 
         try:
-            # 不帶 response_format，避免不支援 JSON mode 的模型回 400
+            # system message 要求直接輸出 JSON，抑制 Qwen3/DeepSeek 等思考型模型的 <think> 區塊
             req_body = {
-                "messages": [{"role": "user", "content": prompt}],
+                "messages": [
+                    {"role": "system", "content": "你是專業會議記錄整理員。請直接輸出符合要求的 JSON，不要輸出任何說明、思考過程或 markdown 格式。"},
+                    {"role": "user", "content": prompt},
+                ],
                 "temperature": 0.1,
                 "stream": False,
-                "max_tokens": 4096,
+                "max_tokens": 8192,
             }
             if model:
                 req_body["model"] = model
@@ -438,10 +453,9 @@ async def lmstudio_analyze(request: dict):
             yield sse({"label": "解析結果…", "pct": 85})
 
             try:
-                start = raw_response.find("{")
-                end   = raw_response.rfind("}") + 1
-                data  = json.loads(raw_response[start:end])
-            except Exception:
+                data = extract_json_from_llm(raw_response)
+            except Exception as parse_err:
+                log.warning(f"LM Studio JSON 解析失敗：{parse_err}｜回傳前200字：{raw_response[:200]}")
                 yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
                 return
 
@@ -583,10 +597,9 @@ async def cloud_analyze(request: dict):
             yield sse({"label": "解析結果…", "pct": 85})
 
             try:
-                start = raw_response.find("{")
-                end   = raw_response.rfind("}") + 1
-                data  = json.loads(raw_response[start:end])
-            except Exception:
+                data = extract_json_from_llm(raw_response)
+            except Exception as parse_err:
+                log.warning(f"雲端 JSON 解析失敗：{parse_err}｜回傳前200字：{raw_response[:200]}")
                 yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
                 return
 

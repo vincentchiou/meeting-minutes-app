@@ -555,6 +555,53 @@
     #analyze-overlay .overlay-card { max-width: 360px; }
     #analyze-pct { font-size: 0.8rem; color: #666; margin-bottom: 6px; }
 
+    /* ── 錯誤對話框 ── */
+    #error-dialog-backdrop {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }
+    #error-dialog-backdrop.show { display: flex; }
+    #error-dialog {
+      background: #fff;
+      border-radius: 12px;
+      padding: 28px 28px 20px;
+      max-width: 420px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    }
+    #error-dialog h3 {
+      font-size: 1rem;
+      color: #c62828;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #error-dialog p {
+      font-size: 0.9rem;
+      color: #444;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 20px;
+    }
+    #error-dialog button {
+      display: block;
+      margin-left: auto;
+      padding: 8px 24px;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    #error-dialog button:hover { background: #1558b0; }
+
     /* ── 通知 toast ── */
     #toast {
       position: fixed;
@@ -802,6 +849,15 @@
       ⚠️ LLM 分析需要 10–60 秒（依模型大小而異），請耐心等候。<br>
       分析完成後可手動修正 <strong>【&lt;&lt;待修正&gt;&gt;】</strong> 欄位。
     </div>
+  </div>
+</div>
+
+<!-- 錯誤對話框 -->
+<div id="error-dialog-backdrop">
+  <div id="error-dialog">
+    <h3>⚠️ 分析失敗</h3>
+    <p id="error-dialog-msg"></p>
+    <button id="error-dialog-ok">確定</button>
   </div>
 </div>
 

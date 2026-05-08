@@ -460,6 +460,14 @@ function showToast(msg, duration = 3500) {
   setTimeout(() => el.classList.remove('show'), duration);
 }
 
+function showErrorDialog(msg) {
+  const backdrop = document.getElementById('error-dialog-backdrop');
+  document.getElementById('error-dialog-msg').textContent = msg;
+  backdrop.classList.add('show');
+  document.getElementById('error-dialog-ok').onclick = () => backdrop.classList.remove('show');
+  backdrop.onclick = (e) => { if (e.target === backdrop) backdrop.classList.remove('show'); };
+}
+
 function escapeHtml(str) {
   return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
 }
@@ -873,11 +881,9 @@ document.addEventListener('DOMContentLoaded', () => {
         showToast(`✅ ${providerName} 分析完成！<<待修正>> 處請手動補充`);
       } catch (err) {
         hideAnalyzeOverlay();
-        // 合併兩條訊息，延遲顯示第二條，確保使用者兩條都看到
-        showToast(`⚠️ ${providerName} 分析失敗：${err.message}`, 4500);
         currentData = analyzer.analyze(title, transcript);
         renderResults(currentData, transcript);
-        setTimeout(() => showToast('✅ 已改用規則型分析，<<待修正>> 處請手動補充'), 4800);
+        showErrorDialog(`${providerName} 分析失敗：\n${err.message}\n\n已自動改用規則型分析，<<待修正>> 處請手動補充。`);
       } finally {
         btnAnalyze.disabled = false;
       }
