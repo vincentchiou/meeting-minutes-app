@@ -2,11 +2,11 @@
 錄音轉會議紀錄 APP — 本地 GPU 版
 FastAPI 後端：自動偵測環境、Whisper 語音辨識、SSE 進度推送
 """
-import os, sys, json, shutil, tempfile, asyncio, logging
+import os, sys, json, re, shutil, tempfile, asyncio, logging
 from pathlib import Path
 from typing import AsyncGenerator
 
-from fastapi import FastAPI, UploadFile, File, HTTPException
+from fastapi import FastAPI, UploadFile, File, HTTPException, Query
 from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
@@ -59,9 +59,64 @@ def detect_environment() -> dict:
         info["ffmpeg"] = True
         log.info("✅ ffmpeg 已安裝（支援 mp3/m4a/ogg/webm）")
     else:
-        log.info("⚠️  ffmpeg 未安裝，僅支援 wav 格式（建議安裝 ffmpeg）")
+        log.info("⚠️  ffmpeg 未安裝，嘗試自動安裝...")
+        info["ffmpeg"] = _try_install_ffmpeg()
 
     return info
+
+
+def _try_install_ffmpeg() -> bool:
+    """嘗試透過 winget 安裝 ffmpeg，成功後更新 PATH 並回傳 True"""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["winget", "install", "Gyan.FFmpeg", "-e", "--silent",
+             "--accept-package-agreements", "--accept-source-agreements"],
+            capture_output=True, timeout=180
+        )
+        if result.returncode not in (0, -1978335189):  # 0=OK, -1978335189=already installed
+            log.warning(f"winget ffmpeg 安裝失敗（returncode={result.returncode}）")
+            return False
+    except FileNotFoundError:
+        log.warning("winget 不存在，無法自動安裝 ffmpeg")
+        return False
+    except Exception as e:
+        log.warning(f"ffmpeg 自動安裝例外：{e}")
+        return False
+
+    # winget 安裝後 ffmpeg 可能在新路徑，嘗試已知常見路徑
+    import glob as _glob
+    candidate_dirs = [
+        r"C:\Program Files\ffmpeg\bin",
+        r"C:\ffmpeg\bin",
+    ] + _glob.glob(r"C:\Users\*\AppData\Local\Microsoft\WinGet\Packages\Gyan.FFmpeg*\ffmpeg*\bin")
+    for d in candidate_dirs:
+        if os.path.isfile(os.path.join(d, "ffmpeg.exe")):
+            os.environ["PATH"] = d + os.pathsep + os.environ.get("PATH", "")
+            log.info(f"✅ ffmpeg 自動安裝完成（{d}）")
+            return True
+
+    # 嘗試重新偵測（PATH 可能已由 winget 更新）
+    if shutil.which("ffmpeg"):
+        log.info("✅ ffmpeg 自動安裝完成")
+        return True
+
+    log.warning("ffmpeg 安裝後仍無法偵測，可能需要重新啟動 start.bat")
+    return False
+
+
+def extract_json_from_llm(raw: str) -> dict:
+    """從 LLM 回傳文字中提取 JSON。
+    自動移除 <think>...</think> 思考區塊（Qwen3 / DeepSeek-R1 等思考型模型）。
+    """
+    # 移除思考過程
+    clean = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    # 找第一個 { 到最後一個 }
+    start = clean.find("{")
+    end   = clean.rfind("}") + 1
+    if start == -1 or end == 0:
+        raise ValueError(f"找不到 JSON 區塊（回傳前100字：{clean[:100]}）")
+    return json.loads(clean[start:end])
 
 
 ENV = detect_environment()
@@ -106,12 +161,29 @@ app.add_middleware(
 
 BASE_DIR = Path(__file__).parent
 
+DOCX_JS_URL  = "https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.min.js"
+DOCX_JS_PATH = BASE_DIR / "docx.min.js"
+
+
+def ensure_docx_js():
+    """若 docx.min.js 不在本機則從 CDN 下載；離線時沿用舊版"""
+    if DOCX_JS_PATH.exists():
+        return
+    try:
+        import urllib.request as _req
+        log.info("下載 docx.js 到本機...")
+        _req.urlretrieve(DOCX_JS_URL, str(DOCX_JS_PATH))
+        log.info(f"✅ docx.js 已儲存至 {DOCX_JS_PATH}")
+    except Exception as e:
+        log.warning(f"docx.js 下載失敗（離線？）：{e}")
+
 
 @app.on_event("startup")
 async def startup_event():
-    """伺服器啟動時預載模型"""
+    """伺服器啟動時預載模型並下載 docx.js"""
     try:
         loop = asyncio.get_running_loop()
+        await loop.run_in_executor(None, ensure_docx_js)
         await loop.run_in_executor(None, load_whisper)
     except Exception as e:
         log.error(f"啟動失敗：{e}")
@@ -124,6 +196,15 @@ app.mount("/static", StaticFiles(directory=str(BASE_DIR)), name="static")
 @app.get("/")
 async def root():
     return FileResponse(str(BASE_DIR / "index.html"))
+
+
+@app.get("/docx.js")
+async def serve_docx_js():
+    """提供本機快取的 docx.min.js（優先）；不存在時 302 到 CDN"""
+    if DOCX_JS_PATH.exists():
+        return FileResponse(str(DOCX_JS_PATH), media_type="application/javascript")
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(DOCX_JS_URL)
 
 
 @app.get("/app.js")
@@ -148,14 +229,15 @@ async def health():
 
 
 # ── Ollama 整合 ──
-OLLAMA_BASE = "http://localhost:11434"
+OLLAMA_DEFAULT = "http://localhost:11434"
 
 @app.get("/ollama/status")
-async def ollama_status():
+async def ollama_status(base_url: str = Query(default=OLLAMA_DEFAULT)):
     """檢查 Ollama 是否執行中，並回傳可用模型清單"""
     import urllib.request, urllib.error
+    base_url = base_url.rstrip("/")
     try:
-        req = urllib.request.Request(f"{OLLAMA_BASE}/api/tags", method="GET")
+        req = urllib.request.Request(f"{base_url}/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode())
             models = [m["name"] for m in data.get("models", [])]
@@ -171,6 +253,7 @@ async def ollama_analyze(request: dict):
     transcript = request.get("transcript", "")
     model      = request.get("model", "llama3")
     title      = request.get("title", "")
+    ollama_base = request.get("base_url", OLLAMA_DEFAULT).rstrip("/")
 
     if not transcript:
         raise HTTPException(status_code=400, detail="transcript 不可為空")
@@ -230,7 +313,7 @@ async def ollama_analyze(request: dict):
 
             def call_ollama():
                 req = urllib.request.Request(
-                    f"{OLLAMA_BASE}/api/generate",
+                    f"{ollama_base}/api/generate",
                     data=payload,
                     headers={"Content-Type": "application/json"},
                     method="POST"
@@ -243,12 +326,10 @@ async def ollama_analyze(request: dict):
 
             yield sse({"label": "解析結果…", "pct": 85})
 
-            # 嘗試解析 JSON（Ollama 有時會加多餘文字）
             try:
-                start = raw_response.find("{")
-                end   = raw_response.rfind("}") + 1
-                data  = json.loads(raw_response[start:end])
-            except Exception:
+                data = extract_json_from_llm(raw_response)
+            except Exception as parse_err:
+                log.warning(f"Ollama JSON 解析失敗：{parse_err}｜回傳前200字：{raw_response[:200]}")
                 yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
                 return
 
@@ -267,14 +348,15 @@ async def ollama_analyze(request: dict):
 
 
 # ── LM Studio 整合（OpenAI-compatible API）──
-LMSTUDIO_BASE = "http://localhost:1234"
+LMSTUDIO_DEFAULT = "http://localhost:1234"
 
 @app.get("/lmstudio/status")
-async def lmstudio_status():
+async def lmstudio_status(base_url: str = Query(default=LMSTUDIO_DEFAULT)):
     """檢查 LM Studio 是否執行中，並回傳已載入模型清單"""
     import urllib.request, urllib.error
+    base_url = base_url.rstrip("/")
     try:
-        req = urllib.request.Request(f"{LMSTUDIO_BASE}/v1/models", method="GET")
+        req = urllib.request.Request(f"{base_url}/v1/models", method="GET")
         with urllib.request.urlopen(req, timeout=3) as resp:
             data = json.loads(resp.read().decode())
             models = [m["id"] for m in data.get("data", [])]
@@ -290,6 +372,7 @@ async def lmstudio_analyze(request: dict):
     transcript = request.get("transcript", "")
     model      = request.get("model", "")
     title      = request.get("title", "")
+    lms_base   = request.get("base_url", LMSTUDIO_DEFAULT).rstrip("/")
 
     if not transcript:
         raise HTTPException(status_code=400, detail="transcript 不可為空")
@@ -335,14 +418,21 @@ async def lmstudio_analyze(request: dict):
         yield sse({"label": f"連接 LM Studio（{model}）…", "pct": 10})
 
         try:
-            payload = json.dumps({
-                "model": model,
-                "messages": [{"role": "user", "content": prompt}],
+            # system message + /no_think 標記，關閉 Qwen3/DeepSeek 等思考型模型的思考模式
+            # enable_thinking: false 為 Qwen3 官方 API 參數（LM Studio >= 0.3.6 支援）
+            req_body = {
+                "messages": [
+                    {"role": "system", "content": "你是專業會議記錄整理員。請直接輸出符合要求的 JSON，不要輸出任何說明、思考過程或 markdown 格式。/no_think"},
+                    {"role": "user", "content": prompt},
+                ],
                 "temperature": 0.1,
                 "stream": False,
-                "max_tokens": 4096,
-                "response_format": {"type": "json_object"}
-            }).encode("utf-8")
+                "max_tokens": 8192,
+                "enable_thinking": False,
+            }
+            if model:
+                req_body["model"] = model
+            payload = json.dumps(req_body).encode("utf-8")
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 30})
 
@@ -350,7 +440,7 @@ async def lmstudio_analyze(request: dict):
 
             def call_lmstudio():
                 req = urllib.request.Request(
-                    f"{LMSTUDIO_BASE}/v1/chat/completions",
+                    f"{lms_base}/v1/chat/completions",
                     data=payload,
                     headers={"Content-Type": "application/json"},
                     method="POST"
@@ -365,10 +455,9 @@ async def lmstudio_analyze(request: dict):
             yield sse({"label": "解析結果…", "pct": 85})
 
             try:
-                start = raw_response.find("{")
-                end   = raw_response.rfind("}") + 1
-                data  = json.loads(raw_response[start:end])
-            except Exception:
+                data = extract_json_from_llm(raw_response)
+            except Exception as parse_err:
+                log.warning(f"LM Studio JSON 解析失敗：{parse_err}｜回傳前200字：{raw_response[:200]}")
                 yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
                 return
 
@@ -484,7 +573,6 @@ async def cloud_analyze(request: dict):
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "max_tokens": 4096,
-                "response_format": {"type": "json_object"},
             }).encode("utf-8")
 
             yield sse({"label": "LLM 分析整理中，請稍候…", "pct": 25})
@@ -511,10 +599,9 @@ async def cloud_analyze(request: dict):
             yield sse({"label": "解析結果…", "pct": 85})
 
             try:
-                start = raw_response.find("{")
-                end   = raw_response.rfind("}") + 1
-                data  = json.loads(raw_response[start:end])
-            except Exception:
+                data = extract_json_from_llm(raw_response)
+            except Exception as parse_err:
+                log.warning(f"雲端 JSON 解析失敗：{parse_err}｜回傳前200字：{raw_response[:200]}")
                 yield sse({"error": "LLM 回傳格式解析失敗，改用規則分析"})
                 return
 
@@ -556,9 +643,12 @@ async def transcribe(file: UploadFile = File(...)):
             detail=f"不支援的格式：{suffix}，支援格式：{', '.join(sorted(allowed))}"
         )
     if not ENV["ffmpeg"] and suffix not in {".wav", ".webm"}:
+        # 再嘗試一次安裝（可能第一次未生效）
+        ENV["ffmpeg"] = _try_install_ffmpeg()
+    if not ENV["ffmpeg"] and suffix not in {".wav", ".webm"}:
         raise HTTPException(
             status_code=400,
-            detail=f"未安裝 ffmpeg，僅支援 wav/webm 格式。請安裝 ffmpeg 以支援 {suffix}"
+            detail=f"ffmpeg 安裝中或失敗，請關閉後重新執行 start.bat，或手動安裝 ffmpeg。目前僅支援 wav/webm 格式。"
         )
 
     # 儲存上傳檔案到暫存目錄

@@ -199,6 +199,34 @@
     .file-label:hover { background: #e8f0fe; }
     #file-upload { display: none; }
 
+    .drop-zone {
+      border: 2px dashed #bbb;
+      border-radius: 10px;
+      padding: 18px 16px;
+      text-align: center;
+      transition: border-color .2s, background .2s;
+    }
+    .drop-zone.drag-over {
+      border-color: #1a73e8;
+      background: #e8f0fe;
+    }
+
+    .ai-url-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .ai-url-row label { font-size: 0.78rem; color: #888; white-space: nowrap; }
+    .ai-url-input {
+      flex: 1;
+      padding: 5px 8px;
+      font-size: 0.82rem;
+      border: 1px solid #ddd;
+      border-radius: 6px;
+      color: #333;
+    }
+
     .rec-status {
       margin-top: 10px;
       font-size: 0.78rem;
@@ -474,6 +502,46 @@
       font-size: 0.75rem;
       color: #aaa;
     }
+    .ai-model-warning {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #fff8e1;
+      border-left: 3px solid #f9a825;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      color: #5d4037;
+      line-height: 1.6;
+    }
+    .ai-model-warning strong { color: #e65100; }
+    .ai-model-vram {
+      margin-top: 10px;
+      font-size: 0.75rem;
+      color: #666;
+      line-height: 1.7;
+    }
+    .ai-model-vram summary {
+      cursor: pointer;
+      color: #1a73e8;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .ai-model-vram table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 0.73rem;
+    }
+    .ai-model-vram th {
+      background: #f5f5f5;
+      padding: 4px 8px;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 1px solid #ddd;
+    }
+    .ai-model-vram td {
+      padding: 4px 8px;
+      border-bottom: 1px solid #f0f0f0;
+    }
     .ai-apikey-row {
       display: flex;
       gap: 8px;
@@ -526,6 +594,53 @@
     #analyze-overlay.show { display: flex; }
     #analyze-overlay .overlay-card { max-width: 360px; }
     #analyze-pct { font-size: 0.8rem; color: #666; margin-bottom: 6px; }
+
+    /* ── 錯誤對話框 ── */
+    #error-dialog-backdrop {
+      display: none;
+      position: fixed; inset: 0;
+      background: rgba(0,0,0,0.45);
+      z-index: 10000;
+      align-items: center;
+      justify-content: center;
+    }
+    #error-dialog-backdrop.show { display: flex; }
+    #error-dialog {
+      background: #fff;
+      border-radius: 12px;
+      padding: 28px 28px 20px;
+      max-width: 420px;
+      width: 90%;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.25);
+    }
+    #error-dialog h3 {
+      font-size: 1rem;
+      color: #c62828;
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    #error-dialog p {
+      font-size: 0.9rem;
+      color: #444;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      word-break: break-word;
+      margin-bottom: 20px;
+    }
+    #error-dialog button {
+      display: block;
+      margin-left: auto;
+      padding: 8px 24px;
+      background: #1a73e8;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      font-size: 0.95rem;
+      cursor: pointer;
+    }
+    #error-dialog button:hover { background: #1558b0; }
 
     /* ── 通知 toast ── */
     #toast {
@@ -581,13 +696,15 @@
 
       <div class="input-block">
         <h3>📂 上傳音檔</h3>
-        <p>支援 mp3、wav、m4a、ogg、webm</p>
-        <label class="file-label" for="file-upload">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="#1a73e8"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
-          選擇檔案
-        </label>
-        <input type="file" id="file-upload" accept=".mp3,.wav,.m4a,.ogg,.webm,audio/*" />
-        <div class="rec-status" id="file-status">尚未選擇檔案</div>
+        <div class="drop-zone" id="drop-zone">
+          <p style="margin:0 0 10px;color:#555">支援 mp3、wav、m4a、ogg、webm　｜　可直接拖曳檔案到此區域</p>
+          <label class="file-label" for="file-upload">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="#1a73e8"><path d="M19.35 10.04C18.67 6.59 15.64 4 12 4 9.11 4 6.6 5.64 5.35 8.04 2.34 8.36 0 10.91 0 14c0 3.31 2.69 6 6 6h13c2.76 0 5-2.24 5-5 0-2.64-2.05-4.78-4.65-4.96zM14 13v4h-4v-4H7l5-5 5 5h-3z"/></svg>
+            選擇檔案
+          </label>
+          <input type="file" id="file-upload" accept=".mp3,.wav,.m4a,.ogg,.webm,audio/*" />
+          <div class="rec-status" id="file-status">尚未選擇檔案</div>
+        </div>
         <div id="progress-wrap">
           <div id="progress-bar-bg"><div id="progress-bar"></div></div>
           <div id="progress-label">準備中…</div>
@@ -610,6 +727,10 @@
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-ollama">
+      <div class="ai-url-row">
+        <label for="ollama-url">伺服器位址</label>
+        <input type="text" id="ollama-url" class="ai-url-input" value="http://localhost:11434" placeholder="http://localhost:11434" />
+      </div>
       <div class="ai-status-row">
         <span class="server-dot offline" id="ollama-dot"></span>
         <span id="ollama-label">尚未檢查</span>
@@ -619,9 +740,26 @@
         <option value="">-- 請先點擊「重新整理」--</option>
       </select>
       <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://ollama.com" target="_blank">Ollama</a>，並執行如 <code>ollama pull llama3</code></div>
+      <div class="ai-model-warning">
+        ❌ <strong>請勿使用思考型模型</strong>（名稱含 <code>thinking</code>、<code>r1</code>、<code>reason</code>）<br>
+        思考過程消耗大量 token，易導致 JSON 截斷分析失敗。<br>
+        ✅ 推薦：<code>qwen2.5:14b</code>、<code>qwen3.5:9b</code>、<code>gemma3:4b</code>
+      </div>
+      <details class="ai-model-vram">
+        <summary>📊 依 VRAM 容量的模型建議</summary>
+        <table>
+          <tr><th>VRAM</th><th>推薦模型（效果較佳）</th></tr>
+          <tr><td>4–8 GB</td><td>gemma-4-E4B ⭐、qwen3.5:9b</td></tr>
+          <tr><td>8–16 GB</td><td>Qwen2.5-14B-Instruct ⭐、qwen3.5:9b</td></tr>
+        </table>
+      </details>
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-lmstudio">
+      <div class="ai-url-row">
+        <label for="lmstudio-url">伺服器位址</label>
+        <input type="text" id="lmstudio-url" class="ai-url-input" value="http://localhost:1234" placeholder="http://localhost:1234" />
+      </div>
       <div class="ai-status-row">
         <span class="server-dot offline" id="lmstudio-dot"></span>
         <span id="lmstudio-label">尚未檢查</span>
@@ -631,6 +769,19 @@
         <option value="">-- 請先點擊「重新整理」--</option>
       </select>
       <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://lmstudio.ai" target="_blank">LM Studio</a>，並在「Local Server」頁面載入模型</div>
+      <div class="ai-model-warning">
+        ❌ <strong>請勿使用思考型模型</strong>（名稱含 <code>thinking</code>、<code>r1</code>、<code>reason</code>）<br>
+        思考過程消耗大量 token，易導致 JSON 截斷分析失敗。<br>
+        ✅ 推薦：Qwen2.5-14B-Instruct、qwen3.5-9b、gemma-4-E4B
+      </div>
+      <details class="ai-model-vram">
+        <summary>📊 依 VRAM 容量的模型建議</summary>
+        <table>
+          <tr><th>VRAM</th><th>推薦模型（效果較佳）</th></tr>
+          <tr><td>4–8 GB</td><td>gemma-4-E4B ⭐、qwen3.5-9b</td></tr>
+          <tr><td>8–16 GB</td><td>Qwen2.5-14B-Instruct ⭐、qwen3.5-9b</td></tr>
+        </table>
+      </details>
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-cloud">
@@ -767,10 +918,19 @@
   </div>
 </div>
 
+<!-- 錯誤對話框 -->
+<div id="error-dialog-backdrop">
+  <div id="error-dialog">
+    <h3>⚠️ 分析失敗</h3>
+    <p id="error-dialog-msg"></p>
+    <button id="error-dialog-ok">確定</button>
+  </div>
+</div>
+
 <div id="toast"></div>
 
-<!-- docx.js CDN -->
-<script src="https://cdn.jsdelivr.net/npm/docx@8.5.0/build/index.min.js"></script>
+<!-- docx.js 已內建於專案（docx.min.js），完全離線可用 -->
+<script src="/static/docx.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
