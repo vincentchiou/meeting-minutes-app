@@ -502,6 +502,46 @@
       font-size: 0.75rem;
       color: #aaa;
     }
+    .ai-model-warning {
+      margin-top: 10px;
+      padding: 8px 12px;
+      background: #fff8e1;
+      border-left: 3px solid #f9a825;
+      border-radius: 4px;
+      font-size: 0.78rem;
+      color: #5d4037;
+      line-height: 1.6;
+    }
+    .ai-model-warning strong { color: #e65100; }
+    .ai-model-vram {
+      margin-top: 10px;
+      font-size: 0.75rem;
+      color: #666;
+      line-height: 1.7;
+    }
+    .ai-model-vram summary {
+      cursor: pointer;
+      color: #1a73e8;
+      font-weight: 500;
+      margin-bottom: 4px;
+    }
+    .ai-model-vram table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 6px;
+      font-size: 0.73rem;
+    }
+    .ai-model-vram th {
+      background: #f5f5f5;
+      padding: 4px 8px;
+      text-align: left;
+      font-weight: 600;
+      border-bottom: 1px solid #ddd;
+    }
+    .ai-model-vram td {
+      padding: 4px 8px;
+      border-bottom: 1px solid #f0f0f0;
+    }
     .ai-apikey-row {
       display: flex;
       gap: 8px;
@@ -700,6 +740,20 @@
         <option value="">-- 請先點擊「重新整理」--</option>
       </select>
       <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://ollama.com" target="_blank">Ollama</a>，並執行如 <code>ollama pull llama3</code></div>
+      <div class="ai-model-warning">
+        ❌ <strong>請勿使用思考型模型</strong>（名稱含 <code>thinking</code>、<code>r1</code>、<code>reason</code>）<br>
+        思考過程消耗大量 token，易導致 JSON 截斷分析失敗。<br>
+        ✅ 建議：<code>qwen2.5:7b</code>、<code>qwen3:8b</code>（非 thinking 版）、<code>llama3.1:8b</code>
+      </div>
+      <details class="ai-model-vram">
+        <summary>📊 依 VRAM 容量的模型建議</summary>
+        <table>
+          <tr><th>VRAM</th><th>推薦模型</th></tr>
+          <tr><td>4 GB 以下</td><td>qwen2.5:3b、gemma3:4b</td></tr>
+          <tr><td>4–8 GB</td><td>qwen2.5:7b ⭐、qwen3:8b、llama3.1:8b</td></tr>
+          <tr><td>8–16 GB</td><td>qwen2.5:14b ⭐、qwen3:14b、mistral-nemo</td></tr>
+        </table>
+      </details>
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-lmstudio">
@@ -716,6 +770,20 @@
         <option value="">-- 請先點擊「重新整理」--</option>
       </select>
       <div class="ai-fallback-note">⚠️ 需先安裝並啟動 <a href="https://lmstudio.ai" target="_blank">LM Studio</a>，並在「Local Server」頁面載入模型</div>
+      <div class="ai-model-warning">
+        ❌ <strong>請勿使用思考型模型</strong>（名稱含 <code>thinking</code>、<code>r1</code>、<code>reason</code>）<br>
+        思考過程消耗大量 token，易導致 JSON 截斷分析失敗。<br>
+        ✅ 建議：Qwen2.5-7B、Qwen3-8B（非 thinking 版）、Llama-3.1-8B
+      </div>
+      <details class="ai-model-vram">
+        <summary>📊 依 VRAM 容量的模型建議</summary>
+        <table>
+          <tr><th>VRAM</th><th>推薦模型</th></tr>
+          <tr><td>4 GB 以下</td><td>Qwen2.5-3B、Gemma-3-4B</td></tr>
+          <tr><td>4–8 GB</td><td>Qwen2.5-7B ⭐、Qwen3-8B、Llama-3.1-8B</td></tr>
+          <tr><td>8–16 GB</td><td>Qwen2.5-14B ⭐、Qwen3-14B、Mistral-Nemo-12B</td></tr>
+        </table>
+      </details>
     </div>
 
     <div class="ai-provider-panel" id="ai-panel-cloud">
